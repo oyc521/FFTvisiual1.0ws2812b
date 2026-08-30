@@ -656,10 +656,10 @@ memory
 
 如有问题或建议，欢迎通过以下方式交流：
 
-- **GitHub Issues**: [提交 Issue](https://github.com/your-username/FFTVISIUAL1.0WS2812B/issues)
-- **Discussions**: [项目讨论区](https://github.com/your-username/FFTVISIUAL1.0WS2812B/discussions)
+- **GitHub Issues**: [提交 Issue](https://github.com/oyc521/FFTvisiual1.0ws2812b/issues)
+- **Discussions**: [项目讨论区](https://github.com/oyc521/FFTvisiual1.0ws2812b/discussions)
 
-> ⚠️ 请将 `your-username` 替换为你的 GitHub 用户名
+
 
 ---
 
