@@ -1,0 +1,9 @@
+dependencies:
+  espressif/esp-dsp: "^1.0.0"
+  espressif/led_strip: "^2.0.0"
+  espressif/esp-http-server:
+    version: ">=2.1.0"
+  espressif/esp-websocket-client:
+    version: ">=1.2.0"
+  espressif/cJSON:
+    version: "^1.7.16"

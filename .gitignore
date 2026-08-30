@@ -1,0 +1,21 @@
+# ESP-IDF build artifacts
+build/
+sdkconfig
+sdkconfig.*
+*.o
+*.d
+*.ld
+.core
+
+# IDE
+.vscode/
+.idea/
+.clangd/
+.devcontainer/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Optional chip configuration data
+nvs/partition_nvs.bin
