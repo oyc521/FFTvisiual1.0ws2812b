@@ -20,3 +20,9 @@ Thumbs.db
 
 # Optional chip configuration data
 nvs/partition_nvs.bin
+
+# 本地调试 / 学习笔记，不入库
+OTA学习笔记.md
+OTA*.md
+main/日志.txt
+*.bak
