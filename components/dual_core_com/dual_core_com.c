@@ -60,6 +60,7 @@ esp_err_t dual_core_com_init(void)
     current_status.current_mode = MODE_SPECTRUM;
     current_status.wifi_connected = false;
     current_status.led_frame_count = 0;
+    current_status.brightness = 100;
     current_status.free_heap_size = esp_get_free_heap_size();
     
     // 重置调试统计
@@ -143,7 +144,17 @@ void dual_core_com_update_status(led_mode_t new_mode, uint32_t frame_count)
             current_status.led_frame_count = frame_count;
         }
         
+        current_status.brightness = led_get_brightness();
         current_status.free_heap_size = esp_get_free_heap_size();
+
+        const led_beat_t *b = led_get_beat();
+        current_status.bpm = b->bpm;
+        uint16_t p = (uint16_t)(b->pulse * 100.0f);
+        if (p > 100) p = 100;
+        current_status.pulse = (uint8_t)p;
+        current_status.energy = b->energy;
+        led_get_post_params(&current_status.gamma, &current_status.gate, &current_status.afterimage);
+
         xSemaphoreGive(status_mutex);
     }
 }

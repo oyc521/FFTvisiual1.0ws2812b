@@ -14,7 +14,7 @@ static const char *TAG = "LED_CORE";
 // 全局变量
 static TaskHandle_t led_core_task_handle = NULL;
 static led_core_config_t s_led_config;
-static led_mode_t current_mode = MODE_METEOR_PULSE;
+static led_mode_t current_mode = MODE_EXPLOSION;
 static uint32_t frame_count = 0;
 //static uint32_t last_stat_time = 0;
 static uint32_t frame_rate = 0;
@@ -60,6 +60,17 @@ static void handle_command(core_command_t *cmd) {
         case CMD_BRIGHTNESS_DOWN:
             // 这里可以添加亮度降低的逻辑
             ESP_LOGI(TAG, "亮度降低命令");
+            break;
+
+        case CMD_BRIGHTNESS_SET:
+            led_set_brightness((uint8_t)cmd->data.param.value);
+            ESP_LOGI(TAG, "亮度设置为: %d", cmd->data.param.value);
+            break;
+
+        case CMD_POST_SET:
+            led_set_post_params(cmd->data.post.gamma, cmd->data.post.gate, cmd->data.post.afterimage);
+            ESP_LOGI(TAG, "后处理更新: gamma=%.2f gate=%u afterimage=%.2f",
+                     (double)cmd->data.post.gamma, (unsigned)cmd->data.post.gate, (double)cmd->data.post.afterimage);
             break;
             
         case CMD_TEST_RAINBOW:
@@ -129,6 +140,7 @@ static void handle_idle_animation(void) {
         case MODE_RHYTHM_JUMP:
         case MODE_SPARKLE_RAINBOW:
         case MODE_EXPLOSION:
+        case MODE_PEAK_HOLD:
             // 这些增强效果也需要处理无音频数据的情况
             led_update_visualization(zero_frequency_bands, NUM_FREQ_BANDS);
             break;

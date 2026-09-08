@@ -1,0 +1,71 @@
+E (841) WIFI_CORE: Failed to connect to WiFi
+I (861) INMP441:   Sample rate: 44100 Hz
+W (861) WIFI_CORE: Failed to connect to saved WiFi, switching to AP mode
+I (861) INMP441:   Buffer size: 1024
+I (831) wifi:state: auth -> init (0x1c0)
+I (831) AUDIO_PROC:   频带数量: 8
+I (831) MAIN: 步骤5: 启动系统监控任务...
+I (841) WIFI_CORE: WiFi disconnected, reason: 202
+I (831) AUDIO_PROC:   采样率: 44100 Hz
+I (841) WIFI_CORE: Attempting to reconnect in 5 seconds...
+I (851) INMP441: Initializing INMP441 microphone...
+E (841) WIFI_CORE: Failed to connect to WiFi
+I (861) INMP441:   Sample rate: 44100 Hz
+W (861) WIFI_CORE: Failed to connect to saved WiFi, switching to AP mode
+I (861) INMP441:   Buffer size: 1024
+I (871) WIFI_CORE: Starting AP mode...
+I (871) INMP441:   I2S port: 0
+I (881) wifi:flush txq
+I (881) INMP441: INMP441 microphone initialized successfully
+I (881) wifi:I (891) AUDIO_PROC: FFT处理器初始化成功
+stop sw txqI (891) LED_CTRL: LED模式设置为: 11
+
+I (901) MAIN: 系统准备就绪，开始音频可视化...
+I (901) wifi:I (901) MAIN: 当前模式：爆炸效果
+lmac stop hw txqI (911) MAIN: 使用INMP441麦克风采集实时音频
+
+I (841) MAIN: ================== 系统状态 ==================
+I (921) MAIN: 音频能量: 总=0.00, 高频=0.00
+I (921) WIFI_CORE: Starting AP mode web server on port 80
+I (931) WIFI_CORE: AP mode web server started successfully
+I (941) WIFI_CORE: Captive DNS server started on port 53
+I (931) MAIN:   当前模式: 3
+I (841) MAIN: ==========================================
+I (951) wifi:I (941) MAIN:   WiFi连接: 未连接
+mode : softAP (98:88:e0:16:fc:6d)
+I (951) MAIN:   LED帧数: 0
+I (961) MAIN:   核心0: WiFi控制 | 核心1: LED渲染
+I (961) wifi:Total power save buffer number: 16I (961) MAIN:   空闲内存: 209800字节
+
+I (971) wifi:Init max length of beacon: 752/752
+I (981) wifi:Init max length of beacon: 752/752
+I (971) MAIN:   最小空闲内存: 209312字节
+I (981) WIFI_CORE: AP mode started - SSID: ESP32-S3-Visualizer, Password: 12345678
+I (951) MAIN: 系统启动完成！
+I (981) MAIN: ============================================
+I (991) MAIN: 请按以下步骤操作：
+I (1001) MAIN: 1. 等待WiFi连接成功
+I (1011) MAIN: 2. 查看串口日志获取IP地址
+I (1011) MAIN: 3. 浏览器访问 http://[设备IP]
+I (1021) MAIN: 4. 音频可视化已自动开始
+I (1021) MAIN: ==========================================
+I (1271) MAIN: 音频能量: 总=8462.77, 高频=2079.77
+I (1611) LED_CORE: 渲染统计: 帧率=95 FPS, 总帧数=95, 丢帧=0
+I (1611) MAIN: 音频能量: 总=1934.24, 高频=15.32
+I (1961) MAIN: 音频能量: 总=7059.25, 高频=2064.76
+I (2311) MAIN: 音频能量: 总=1246.67, 高频=15.40
+I (2661) MAIN: 音频能量: 总=649.26, 高频=16.03
+I (3011) MAIN: 音频能量: 总=1271.68, 高频=16.41
+I (3361) MAIN: 音频能量: 总=2065.54, 高频=19.98
+I (3701) MAIN: 音频能量: 总=34212.41, 高频=10225.89
+I (4051) MAIN: 音频能量: 总=804.94, 高频=19.47
+I (4401) MAIN: 音频能量: 总=1704.02, 高频=19.11
+I (4751) MAIN: 音频能量: 总=8531.07, 高频=2081.55
+I (5101) MAIN: 音频能量: 总=1791.53, 高频=97.62
+I (5451) MAIN: 音频能量: 总=1164.72, 高频=13.52
+I (5791) MAIN: 音频能量: 总=8079.21, 高频=2067.10
+I (5851) WIFI_CORE: WiFi AP started
+I (5851) esp_netif_lwip: DHCP server started on interface WIFI_AP_DEF with IP: 192.168.4.1
+I (6141) MAIN: 音频能量: 总=1346.64, 高频=14.39
+I (6491) MAIN: 音频能量: 总=1930.52, 高频=13.03
+I (6841) MAIN: 音频能量: 总=2591.25, 高频=15.24

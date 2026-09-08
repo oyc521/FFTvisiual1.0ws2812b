@@ -6,6 +6,7 @@
 #include "esp_http_server.h"
 #include "esp_netif.h"
 #include "esp_system.h"
+#include "esp_app_desc.h"
 #include "nvs_flash.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -14,6 +15,7 @@
 #include "lwip/sys.h"
 #include "lwip/ip4_addr.h"
 #include "cJSON.h"
+#include "ota_updater.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -51,6 +53,21 @@ static bool s_wifi_configured = false;
 static char s_stored_ssid[33] = {0};
 static char s_stored_password[65] = {0};
 static char s_device_name[33] = {0};
+
+static void add_cors_headers(httpd_req_t *req)
+{
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type, Accept");
+    httpd_resp_set_hdr(req, "Access-Control-Max-Age", "86400");
+}
+
+static esp_err_t cors_preflight_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+    httpd_resp_set_status(req, "204 No Content");
+    return httpd_resp_send(req, NULL, 0);
+}
 
 // 内部函数声明
 static esp_err_t start_ap_mode(void);
@@ -225,6 +242,7 @@ static void provision_apply_task(void *pvParameters)
 
 static esp_err_t api_provision_handler(httpd_req_t *req)
 {
+    add_cors_headers(req);
     char content[256];
     int ret = httpd_req_recv(req, content, sizeof(content) - 1);
     if (ret <= 0) {
@@ -321,6 +339,7 @@ static esp_err_t api_provision_handler(httpd_req_t *req)
 // API: 获取当前模式
 static esp_err_t api_mode_get_handler(httpd_req_t *req)
 {
+    add_cors_headers(req);
     core_status_t status;
     dual_core_com_get_status(&status);
     
@@ -338,6 +357,7 @@ static esp_err_t api_mode_get_handler(httpd_req_t *req)
 }
 
 static esp_err_t api_mode_set_handler(httpd_req_t *req) {
+    add_cors_headers(req);
     ESP_LOGI(TAG, "Receive mode set request");
     
     char query_str[32] = {0};
@@ -374,7 +394,7 @@ static esp_err_t api_mode_set_handler(httpd_req_t *req) {
         ESP_LOGI(TAG, "Mode value: %d", mode);
 
         // 检查模式值是否有效 (0-12)
-        if (mode < 0 || mode > 12) {
+        if (mode < MODE_SPECTRUM || mode > MODE_OFF) {
             cJSON *root = cJSON_CreateObject();
             cJSON_AddBoolToObject(root, "success", false);
             cJSON_AddStringToObject(root, "error", "Mode value out of range");
@@ -441,6 +461,7 @@ static esp_err_t api_mode_set_handler(httpd_req_t *req) {
 // API: 发送命令
 static esp_err_t api_command_handler(httpd_req_t *req)
 {
+    add_cors_headers(req);
     char query_str[32] = {0};
     if (httpd_req_get_url_query_str(req, query_str, sizeof(query_str)) == ESP_OK) {
         char cmd_str[32] = {0};
@@ -455,7 +476,7 @@ static esp_err_t api_command_handler(httpd_req_t *req)
                 cmd.type = CMD_TEST_RAINBOW;
             } else if (strcmp(cmd_str, "clear_all") == 0) {
                 cmd.type = CMD_MODE_CHANGE;
-                cmd.data.mode = 8; // MODE_OFF
+                cmd.data.mode = MODE_OFF;
             } else {
                 cJSON *root = cJSON_CreateObject();
                 cJSON_AddBoolToObject(root, "success", false);
@@ -505,6 +526,7 @@ static esp_err_t api_command_handler(httpd_req_t *req)
 // API: 获取状态
 static esp_err_t api_status_handler(httpd_req_t *req)
 {
+    add_cors_headers(req);
     core_status_t status;
     dual_core_com_get_status(&status);
     
@@ -515,7 +537,21 @@ static esp_err_t api_status_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "free_heap", status.free_heap_size);
     cJSON_AddBoolToObject(root, "is_ap_mode", s_is_ap_mode);
     cJSON_AddBoolToObject(root, "wifi_configured", s_wifi_configured);
+    cJSON_AddNumberToObject(root, "brightness", status.brightness);
+    cJSON_AddNumberToObject(root, "bpm", status.bpm);
+    cJSON_AddNumberToObject(root, "pulse", status.pulse);
+    cJSON_AddNumberToObject(root, "energy", status.energy);
+    cJSON_AddNumberToObject(root, "gamma", status.gamma);
+    cJSON_AddNumberToObject(root, "gate", status.gate);
+    cJSON_AddNumberToObject(root, "afterimage", status.afterimage);
     cJSON_AddStringToObject(root, "device_name", s_device_name);
+
+    const esp_app_desc_t *app_desc = esp_app_get_description();
+    if (app_desc != NULL) {
+        cJSON_AddStringToObject(root, "fw_version", app_desc->version);
+        cJSON_AddStringToObject(root, "project_name", app_desc->project_name);
+        cJSON_AddStringToObject(root, "idf_version", app_desc->idf_ver);
+    }
     
     // 获取IP地址
     char ip_buffer[16] = {0};
@@ -535,8 +571,125 @@ static esp_err_t api_status_handler(httpd_req_t *req)
 // /ping handler for connectivity test
 static esp_err_t ping_handler(httpd_req_t *req)
 {
+    add_cors_headers(req);
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_send(req, "pong", 4);
+}
+
+static esp_err_t api_brightness_get_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+    core_status_t status;
+    dual_core_com_get_status(&status);
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "brightness", status.brightness);
+    char *json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json_str, strlen(json_str));
+    free(json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t api_brightness_set_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+
+    char query_str[16] = {0};
+    if (httpd_req_get_url_query_str(req, query_str, sizeof(query_str)) != ESP_OK) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"success\":false,\"error\":\"no value\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    char value_str[8] = {0};
+    if (httpd_query_key_value(query_str, "value", value_str, sizeof(value_str)) != ESP_OK) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"success\":false,\"error\":\"missing value\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    int value = atoi(value_str);
+    if (value < 0 || value > 100) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"success\":false,\"error\":\"out of range 0-100\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+
+    core_command_t cmd = {
+        .type = CMD_BRIGHTNESS_SET,
+    };
+    cmd.data.param.value = value;
+
+    esp_err_t ret = dual_core_com_send_command(&cmd, pdMS_TO_TICKS(100));
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "success", ret == ESP_OK);
+    cJSON_AddNumberToObject(root, "brightness", value);
+    char *json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json_str, strlen(json_str));
+    free(json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static float qs_get_float(httpd_req_t *req, const char *key, float def)
+{
+    char q[80] = {0};
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) != ESP_OK) return def;
+    char val[16] = {0};
+    if (httpd_query_key_value(q, key, val, sizeof(val)) != ESP_OK) return def;
+    return strtof(val, NULL);
+}
+
+static esp_err_t api_post_get_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+    core_status_t status;
+    dual_core_com_get_status(&status);
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "gamma", status.gamma);
+    cJSON_AddNumberToObject(root, "gate", status.gate);
+    cJSON_AddNumberToObject(root, "afterimage", status.afterimage);
+    char *json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json_str, strlen(json_str));
+    free(json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t api_post_set_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+
+    float gamma = qs_get_float(req, "gamma", 1.0f);
+    int gate = (int)qs_get_float(req, "gate", 0.0f);
+    float afterimage = qs_get_float(req, "afterimage", 0.0f);
+    if (gate < 0) gate = 0;
+    if (gate > 64) gate = 64;
+
+    core_command_t cmd = { .type = CMD_POST_SET };
+    cmd.data.post.gamma = gamma;
+    cmd.data.post.gate = (uint8_t)gate;
+    cmd.data.post.afterimage = afterimage;
+
+    esp_err_t ret = dual_core_com_send_command(&cmd, pdMS_TO_TICKS(100));
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddBoolToObject(root, "success", ret == ESP_OK);
+    cJSON_AddNumberToObject(root, "gamma", gamma);
+    cJSON_AddNumberToObject(root, "gate", gate);
+    cJSON_AddNumberToObject(root, "afterimage", afterimage);
+    char *json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json_str, strlen(json_str));
+    free(json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
 }
 
 // STA模式根路径处理器（极简页面）
@@ -649,6 +802,62 @@ static const httpd_uri_t api_status = {
     .user_ctx  = NULL
 };
 
+static const httpd_uri_t api_brightness_get = {
+    .uri       = "/api/brightness",
+    .method    = HTTP_GET,
+    .handler   = api_brightness_get_handler,
+    .user_ctx  = NULL
+};
+
+static const httpd_uri_t api_brightness_set = {
+    .uri       = "/api/brightness",
+    .method    = HTTP_POST,
+    .handler   = api_brightness_set_handler,
+    .user_ctx  = NULL
+};
+
+static const httpd_uri_t api_post_get = {
+    .uri       = "/api/post",
+    .method    = HTTP_GET,
+    .handler   = api_post_get_handler,
+    .user_ctx  = NULL
+};
+
+static const httpd_uri_t api_post_set = {
+    .uri       = "/api/post",
+    .method    = HTTP_POST,
+    .handler   = api_post_set_handler,
+    .user_ctx  = NULL
+};
+
+static const httpd_uri_t preflight_post = {
+    .uri       = "/api/post",
+    .method    = HTTP_OPTIONS,
+    .handler   = cors_preflight_handler,
+    .user_ctx  = NULL
+};
+
+static const httpd_uri_t preflight_mode = {
+    .uri       = "/api/mode",
+    .method    = HTTP_OPTIONS,
+    .handler   = cors_preflight_handler,
+    .user_ctx  = NULL
+};
+
+static const httpd_uri_t preflight_command = {
+    .uri       = "/api/command",
+    .method    = HTTP_OPTIONS,
+    .handler   = cors_preflight_handler,
+    .user_ctx  = NULL
+};
+
+static const httpd_uri_t preflight_provision = {
+    .uri       = "/api/provision",
+    .method    = HTTP_OPTIONS,
+    .handler   = cors_preflight_handler,
+    .user_ctx  = NULL
+};
+
 // 启动AP模式的Web服务器
 static esp_err_t start_web_server(void)
 {
@@ -675,9 +884,16 @@ static esp_err_t start_web_server(void)
     httpd_register_uri_handler(server, &api_provision);
     httpd_register_uri_handler(server, &api_status);
     httpd_register_uri_handler(server, &api_ping);
+    httpd_register_uri_handler(server, &api_brightness_get);
+    httpd_register_uri_handler(server, &api_brightness_set);
+    httpd_register_uri_handler(server, &api_post_get);
+    httpd_register_uri_handler(server, &api_post_set);
+    httpd_register_uri_handler(server, &preflight_post);
     httpd_register_uri_handler(server, &captive_generate_204);
     httpd_register_uri_handler(server, &captive_hotspot_detect);
     httpd_register_uri_handler(server, &captive_ncsi);
+    httpd_register_uri_handler(server, &preflight_provision);
+    ota_updater_register_httpd(server);
 
     // 启动 DNS 劫持服务
     if (start_dns_server() != ESP_OK) {
@@ -716,7 +932,15 @@ static esp_err_t wifi_core_start_api_server(void)
     httpd_register_uri_handler(server, &api_command);
     httpd_register_uri_handler(server, &api_status);
     httpd_register_uri_handler(server, &api_ping);
-    
+    httpd_register_uri_handler(server, &api_brightness_get);
+    httpd_register_uri_handler(server, &api_brightness_set);
+    httpd_register_uri_handler(server, &api_post_get);
+    httpd_register_uri_handler(server, &api_post_set);
+    httpd_register_uri_handler(server, &preflight_post);
+    httpd_register_uri_handler(server, &preflight_mode);
+    httpd_register_uri_handler(server, &preflight_command);
+    ota_updater_register_httpd(server);
+
     ESP_LOGI(TAG, "STA API server started successfully");
     return ESP_OK;
 }
@@ -936,6 +1160,7 @@ static esp_err_t start_sta_mode(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
+    esp_wifi_set_ps(WIFI_PS_NONE);
     
     ESP_LOGI(TAG, "STA mode started, connecting to: %s", s_stored_ssid);
     

@@ -17,6 +17,7 @@
 #include "utils.h"
 #include "dual_core_com.h"
 #include "wifi_core.h"
+#include "ota_updater.h"
 #include "led_core.h"
 
 static const char *TAG = "MAIN";
@@ -88,8 +89,12 @@ void audio_processing_task(void *pvParameter) {
         vTaskDelete(NULL);
     }
     
-    // 设置默认LED模式
-    led_set_mode(MODE_EXPLOSION);
+    // 设置默认LED模式（走双核命令，保证核心1状态同步）
+    core_command_t boot_cmd = {
+        .type = CMD_MODE_CHANGE,
+        .data.mode = MODE_EXPLOSION
+    };
+    dual_core_com_send_command(&boot_cmd, pdMS_TO_TICKS(100));
     
     ESP_LOGI(TAG, "系统准备就绪，开始音频可视化...");
     ESP_LOGI(TAG, "当前模式：爆炸效果");
@@ -205,6 +210,8 @@ void app_main(void) {
     // 8. 创建系统监控任务
     ESP_LOGI(TAG, "步骤5: 启动系统监控任务...");
     xTaskCreate(system_monitor_task, "monitor_task", 4096, NULL, 1, NULL);
+
+    ota_updater_confirm_boot();
     
     ESP_LOGI(TAG, "==========================================");
     ESP_LOGI(TAG, "系统启动完成！");

@@ -2,6 +2,9 @@
 #include "esp_log.h"
 #include "driver/rmt_tx.h"
 #include "led_strip.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "esp_timer.h"
 #include "math.h"
 #ifndef NUM_FREQ_BANDS
 #define NUM_FREQ_BANDS 32  // 假设默认值为 32，根据实际情况调整
@@ -13,6 +16,165 @@ static led_strip_handle_t strip = NULL;
 static int led_count = 0;
 static led_mode_t current_mode = MODE_OFF;
 static uint32_t animation_counter = 0;
+
+static uint8_t s_brightness_percent = 100;
+static float s_global_brightness = 1.0f;
+
+static inline uint8_t scale_channel(uint8_t ch)
+{
+    float v = (float)ch * s_global_brightness;
+    if (v > 255.0f) v = 255.0f;
+    if (v < 0.0f) v = 0.0f;
+    return (uint8_t)v;
+}
+
+static inline rgb_color_t scale_color(rgb_color_t c)
+{
+    c.r = scale_channel(c.r);
+    c.g = scale_channel(c.g);
+    c.b = scale_channel(c.b);
+    return c;
+}
+
+// ===================== 全局后处理管线 =====================
+static float    g_post_gamma     = 1.18f;
+static uint8_t  g_post_gate      = 8;
+static float    g_post_afterglow = 0.62f;
+
+typedef struct { uint8_t r, g, b; } post_px_t;
+static post_px_t s_post_prev[256];
+
+static esp_err_t led_out_pixel(int idx, rgb_color_t c)
+{
+    if (!strip || idx < 0 || idx >= led_count) return ESP_ERR_INVALID_ARG;
+
+    uint8_t dr = c.r, dg = c.g, db = c.b;
+
+    if (led_count <= 256) {
+        post_px_t *p = &s_post_prev[idx];
+        uint8_t pr = (uint8_t)(p->r * g_post_afterglow);
+        uint8_t pg = (uint8_t)(p->g * g_post_afterglow);
+        uint8_t pb = (uint8_t)(p->b * g_post_afterglow);
+        if (pr > dr) dr = pr;
+        if (pg > dg) dg = pg;
+        if (pb > db) db = pb;
+        p->r = dr;
+        p->g = dg;
+        p->b = db;
+    }
+
+    if (dr < g_post_gate && dg < g_post_gate && db < g_post_gate) {
+        dr = dg = db = 0;
+    }
+
+    const float inv255 = 1.0f / 255.0f;
+    float rr = powf(dr * inv255, g_post_gamma) * 255.0f * s_global_brightness;
+    float rg = powf(dg * inv255, g_post_gamma) * 255.0f * s_global_brightness;
+    float rb = powf(db * inv255, g_post_gamma) * 255.0f * s_global_brightness;
+    if (rr > 255.0f) rr = 255.0f;
+    if (rg > 255.0f) rg = 255.0f;
+    if (rb > 255.0f) rb = 255.0f;
+
+    return led_strip_set_pixel(strip, idx, (uint8_t)rr, (uint8_t)rg, (uint8_t)rb);
+}
+
+void led_set_post_params(float gamma, uint8_t noise_gate, float afterimage)
+{
+    if (gamma < 1.0f) gamma = 1.0f;
+    if (gamma > 2.5f) gamma = 2.5f;
+    if (afterimage < 0.0f) afterimage = 0.0f;
+    if (afterimage > 0.9f) afterimage = 0.9f;
+    g_post_gamma = gamma;
+    g_post_gate = noise_gate;
+    g_post_afterglow = afterimage;
+}
+
+void led_get_post_params(float *gamma, uint8_t *gate, float *afterimage)
+{
+    if (gamma) *gamma = g_post_gamma;
+    if (gate) *gate = g_post_gate;
+    if (afterimage) *afterimage = g_post_afterglow;
+}
+
+// ===================== 统一节拍引擎 =====================
+static led_beat_t s_beat;
+static float s_prev_bands[NUM_FREQ_BANDS];
+static float s_bass_hist = 0.0f;
+static float s_flux_hist = 0.0f;
+static uint32_t s_last_beat_ms = 0;
+static float s_beat_interval_ms = 0.0f;
+
+const led_beat_t *led_get_beat(void)
+{
+    return &s_beat;
+}
+
+static void led_beat_update(const float *bands, int n)
+{
+    if (!bands || n <= 0) {
+        s_beat.pulse *= 0.86f;
+        if (s_beat.pulse < 0.02f) s_beat.pulse = 0.0f;
+        s_beat.onset = false;
+        return;
+    }
+    if (n > NUM_FREQ_BANDS) n = NUM_FREQ_BANDS;
+
+    float bass = 0, mid = 0, high = 0, tot = 0, flux = 0;
+    int nb = 0, nm = 0, nh = 0;
+    int b_end = n / 4;
+    int m_end = n * 4 / 5;
+
+    for (int i = 0; i < n; i++) {
+        float v = bands[i];
+        tot += v;
+        if (i < b_end) { bass += v; nb++; }
+        else if (i < m_end) { mid += v; nm++; }
+        else { high += v; nh++; }
+        float d = v - s_prev_bands[i];
+        if (d > 0) flux += d;
+        s_prev_bands[i] = v;
+    }
+    if (nb) bass /= nb;
+    if (nm) mid /= nm;
+    if (nh) high /= nh;
+    tot /= n;
+
+    s_bass_hist = s_bass_hist * 0.90f + bass * 0.10f;
+    s_flux_hist = s_flux_hist * 0.90f + flux * 0.10f;
+
+    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    uint32_t since = now_ms - s_last_beat_ms;
+    bool onset = false;
+    if (since > 250) {
+        if ((bass > s_bass_hist * 1.28f && bass > 20.0f) ||
+            (flux > s_flux_hist * 1.7f && flux > 25.0f)) {
+            onset = true;
+        }
+    }
+
+    s_beat.bass = bass;
+    s_beat.mid = mid;
+    s_beat.high = high;
+    s_beat.energy = tot;
+    s_beat.flux = flux;
+    s_beat.onset = onset;
+
+    if (onset) {
+        if (s_last_beat_ms != 0 && since > 250 && since < 2000) {
+            if (s_beat_interval_ms <= 0) s_beat_interval_ms = since;
+            else s_beat_interval_ms = s_beat_interval_ms * 0.7f + since * 0.3f;
+            float bpm = 60000.0f / s_beat_interval_ms;
+            if (bpm < 30) bpm = 30;
+            if (bpm > 240) bpm = 240;
+            s_beat.bpm = (uint8_t)(bpm + 0.5f);
+        }
+        s_last_beat_ms = now_ms;
+        s_beat.pulse = 1.0f;
+    } else {
+        s_beat.pulse *= 0.86f;
+        if (s_beat.pulse < 0.02f) s_beat.pulse = 0.0f;
+    }
+}
 
 // 流星脉冲效果专用变量
 typedef struct {
@@ -560,7 +722,11 @@ esp_err_t led_controller_init(const led_config_t *config) {
     
     led_count = config->num_leds;
     current_mode = MODE_OFF;
-    
+
+    uint8_t bp = (config->brightness > 100) ? 100 : config->brightness;
+    s_brightness_percent = bp;
+    s_global_brightness = (float)bp / 100.0f;
+
     init_color_buffer(); // 初始化颜色缓冲区
 
     // 初始化烟花状态
@@ -661,17 +827,16 @@ static void set_buffer_pixel_blend(int index, rgb_color_t color, float blend_fac
     }
 }
 
-// 将缓冲区内容应用到LED灯带
+// 将缓冲区内容应用到LED灯带（统一走后处理出口）
 static esp_err_t apply_color_buffer(void) {
     if (!strip || effects_state.color_buffer == NULL) return ESP_ERR_INVALID_STATE;
-    
+
     for (int i = 0; i < led_count; i++) {
-        rgb_color_t color = effects_state.color_buffer[i];
-        esp_err_t ret = led_strip_set_pixel(strip, i, color.r, color.g, color.b);
+        esp_err_t ret = led_out_pixel(i, effects_state.color_buffer[i]);
         if (ret != ESP_OK) return ret;
     }
-    
-    return led_strip_refresh(strip);
+
+    return ESP_OK;
 }
 
 // 设置所有LED颜色
@@ -679,7 +844,8 @@ esp_err_t led_set_all(rgb_color_t color) {
     if (!strip) return ESP_ERR_INVALID_STATE;
     
     for (int i = 0; i < led_count; i++) {
-        esp_err_t ret = led_strip_set_pixel(strip, i, color.r, color.g, color.b);
+        rgb_color_t out_color = scale_color(color);
+        esp_err_t ret = led_strip_set_pixel(strip, i, out_color.r, out_color.g, out_color.b);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "设置LED %d 失败: %s", i, esp_err_to_name(ret));
             return ret;
@@ -694,7 +860,8 @@ esp_err_t led_set_pixel(int index, rgb_color_t color) {
     if (!strip) return ESP_ERR_INVALID_STATE;
     if (index < 0 || index >= led_count) return ESP_ERR_INVALID_ARG;
     
-    esp_err_t ret = led_strip_set_pixel(strip, index, color.r, color.g, color.b);
+    rgb_color_t out_color = scale_color(color);
+    esp_err_t ret = led_strip_set_pixel(strip, index, out_color.r, out_color.g, out_color.b);
     if (ret != ESP_OK) return ret;
     
     return ESP_OK;
@@ -804,7 +971,8 @@ esp_err_t led_test_rainbow(void) {
             hue = hue - (int)hue;
             
             rgb_color_t color = hsv_to_rgb(hue, 1.0, 0.5);
-            led_strip_set_pixel(strip, i, color.r, color.g, color.b);
+            rgb_color_t out_color = scale_color(color);
+            led_strip_set_pixel(strip, i, out_color.r, out_color.g, out_color.b);
         }
         
         led_strip_refresh(strip);
@@ -814,9 +982,31 @@ esp_err_t led_test_rainbow(void) {
     return ESP_OK;
 }
 
+// 设置全局亮度（0-100，百分比）
+esp_err_t led_set_brightness(uint8_t brightness_percent)
+{
+    uint8_t p = brightness_percent;
+    if (p > 100) p = 100;
+    s_brightness_percent = p;
+    s_global_brightness = (float)p / 100.0f;
+    return ESP_OK;
+}
+
+uint8_t led_get_brightness(void)
+{
+    return s_brightness_percent;
+}
+
 // 设置模式
 esp_err_t led_set_mode(led_mode_t mode) {
     current_mode = mode;
+    for (int i = 0; i < 256; i++) {
+        s_post_prev[i].r = 0;
+        s_post_prev[i].g = 0;
+        s_post_prev[i].b = 0;
+    }
+    s_beat.pulse = 0.0f;
+    s_beat.onset = false;
     ESP_LOGI(TAG, "LED模式设置为: %d", mode);
     return ESP_OK;
 }
@@ -2476,6 +2666,9 @@ static esp_err_t rhythm_jump_effect(float *energy_bands, int num_bands) {
         }
         global_energy /= num_bands;
     }
+
+    const led_beat_t *beat = led_get_beat();
+    float rj_pulse = beat->pulse;
     
     float band_energies[8] = {0};
     if (energy_bands && num_bands > 0) {
@@ -2536,10 +2729,10 @@ static esp_err_t rhythm_jump_effect(float *energy_bands, int num_bands) {
         // 全局能量增强
         target_height *= (1.0f + global_energy * 0.01f);
         
-        // 确保最小高度，让效果更明显
-        if (target_height < 0.15f) target_height = 0.15f;
+        // 确保最小高度（压得很低，安静时接近熄灭，突出鼓点对比）
+        if (target_height < 0.04f) target_height = 0.04f;
         
-        rhythm_jump_state.segments[i].target_height = target_height;
+        rhythm_jump_state.segments[i].target_height = target_height + rj_pulse * 1.2f;
     }
     
     update_physics_simulation();
@@ -2574,13 +2767,14 @@ static esp_err_t rhythm_jump_effect(float *energy_bands, int num_bands) {
         int lit_leds = (int)(height * segment_leds);
         if (lit_leds > segment_leds) lit_leds = segment_leds;
         
-        // 动态颜色：根据高度变化色调和饱和度
+        // 动态颜色：根据高度变化色调和饱和度（脉冲时更白更亮）
         float hue = fmodf(rhythm_jump_state.color_hue + (segment * 0.125f), 1.0f);
-        float saturation = 1.0f - height * 0.2f;  // 高度越高，饱和度越低（更白）
-        if (saturation < 0.7f) saturation = 0.7f;
+        float saturation = 1.0f - height * 0.2f - rj_pulse * 0.4f;  // 高度越高、脉冲越强越白
+        if (saturation < 0.5f) saturation = 0.5f;
         
-        // 动态亮度：高度越高越亮，且考虑全局亮度
-        float value = (0.5f + height * 0.5f) * global_brightness * rhythm_jump_state.brightness_boost;
+        // 动态亮度：底色很暗，高度/鼓点越强才越亮，对比拉满
+        float value = (0.06f + height * 0.95f) * global_brightness *
+                      (rhythm_jump_state.brightness_boost + 0.7f * rj_pulse);
         if (value > 1.0f) value = 1.0f;
         
         rgb_color_t segment_color = hsv_to_rgb(hue, saturation, value);
@@ -2630,12 +2824,12 @@ static esp_err_t rhythm_jump_effect(float *energy_bands, int num_bands) {
                     }
                 }
             } else {
-                // 背景光：更亮的背景，让未点亮部分也有光感
-                float background_brightness = 0.1f + height * 0.05f;  // 背景光随高度变化
+                // 背景光：很暗的余光，安静时接近黑，突出鼓点
+                float background_brightness = 0.05f + height * 0.04f;
                 rgb_color_t bg_color = {
-                    .r = (uint8_t)(segment_color.r * background_brightness * 0.3f),
-                    .g = (uint8_t)(segment_color.g * background_brightness * 0.3f),
-                    .b = (uint8_t)(segment_color.b * background_brightness * 0.3f)
+                    .r = (uint8_t)(segment_color.r * background_brightness * 0.25f),
+                    .g = (uint8_t)(segment_color.g * background_brightness * 0.25f),
+                    .b = (uint8_t)(segment_color.b * background_brightness * 0.25f)
                 };
                 
                 set_buffer_pixel(led_index, bg_color);
@@ -3763,175 +3957,210 @@ static esp_err_t explosion_collision_effect(float *energy_bands, int num_bands) 
     return apply_color_buffer();
 }
 
-// 更新可视化效果
-esp_err_t led_update_visualization(float *energy_bands, int num_bands) {
+#define PEAK_HOLD_MAX_LEDS 256
+static float s_pk_level[PEAK_HOLD_MAX_LEDS];
+static float s_pk_peak[PEAK_HOLD_MAX_LEDS];
+static float s_pk_agc[PEAK_HOLD_MAX_LEDS];
+static float s_sp_level[PEAK_HOLD_MAX_LEDS];
+static float s_sp_agc[PEAK_HOLD_MAX_LEDS];
+
+static float eq_hue_at(int i, int count)
+{
+    if (count <= 1) return 0.0f;
+    return ((float)i / (float)(count - 1)) * 0.72f;
+}
+
+static float eq_norm(float raw, float *agc)
+{
+    float peak = *agc;
+    if (raw > peak) {
+        peak = raw;
+    } else {
+        peak = peak * 0.990f;
+    }
+    if (peak < 4.0f) peak = 4.0f;
+    *agc = peak;
+    float n = raw / peak;
+    if (n > 1.0f) n = 1.0f;
+    if (n < 0.0f) n = 0.0f;
+    return powf(n, 0.6f);
+}
+
+static esp_err_t peak_hold_effect(float *energy_bands, int num_bands)
+{
     if (!strip) return ESP_ERR_INVALID_STATE;
-    
-    // 安全检查
-    if (current_mode != MODE_RAINBOW && current_mode != MODE_DEBUG && 
+    if (led_count <= 0 || led_count > PEAK_HOLD_MAX_LEDS) return ESP_ERR_INVALID_ARG;
+
+    int eff = num_bands - 1;
+    if (eff <= 0) eff = 1;
+
+    for (int i = 0; i < led_count; i++) {
+        int band = (i * eff) / led_count + 1;
+        if (band >= num_bands) band = num_bands - 1;
+
+        float target = eq_norm(energy_bands[band], &s_pk_agc[i]);
+
+        if (target > s_pk_level[i]) {
+            s_pk_level[i] += (target - s_pk_level[i]) * 0.55f;
+        } else {
+            s_pk_level[i] += (target - s_pk_level[i]) * 0.05f;
+        }
+
+        if (s_pk_level[i] > s_pk_peak[i]) {
+            s_pk_peak[i] = s_pk_level[i];
+        } else {
+            s_pk_peak[i] *= 0.984f;
+        }
+        if (s_pk_peak[i] < 0.002f) s_pk_peak[i] = 0.0f;
+
+        float value = 0.10f + 0.90f * (0.45f * s_pk_level[i] + 0.55f * s_pk_peak[i]);
+        if (value > 1.0f) value = 1.0f;
+
+        float hue = eq_hue_at(i, led_count);
+        bool hot = (s_pk_level[i] >= s_pk_peak[i] - 0.03f) && (s_pk_level[i] > 0.30f);
+
+        rgb_color_t color;
+        if (hot) {
+            uint8_t w = (uint8_t)(255.0f * s_pk_level[i]);
+            color.r = w;
+            color.g = w;
+            color.b = w;
+        } else {
+            color = hsv_to_rgb(hue, 0.88f, value);
+        }
+        led_out_pixel(i, color);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t spectrum_effect(float *energy_bands, int num_bands)
+{
+    if (!strip) return ESP_ERR_INVALID_STATE;
+    if (led_count <= 0 || led_count > PEAK_HOLD_MAX_LEDS) return ESP_ERR_INVALID_ARG;
+
+    int eff = num_bands - 1;
+    if (eff <= 0) eff = 1;
+
+    for (int i = 0; i < led_count; i++) {
+        int band = (i * eff) / led_count + 1;
+        if (band >= num_bands) band = num_bands - 1;
+
+        float n = eq_norm(energy_bands[band], &s_sp_agc[i]);
+        float v = sqrtf(n);
+
+        if (v > s_sp_level[i]) {
+            s_sp_level[i] += (v - s_sp_level[i]) * 0.55f;
+        } else {
+            s_sp_level[i] += (v - s_sp_level[i]) * 0.12f;
+        }
+    }
+
+    for (int i = 0; i < led_count; i++) {
+        float glow = s_sp_level[i];
+        if (i > 0) {
+            float l = s_sp_level[i - 1] * 0.85f;
+            if (l > glow) glow = l;
+        }
+        if (i + 1 < led_count) {
+            float r = s_sp_level[i + 1] * 0.85f;
+            if (r > glow) glow = r;
+        }
+
+        float value = 0.06f + 0.94f * glow;
+        if (value > 1.0f) value = 1.0f;
+
+        float hue = eq_hue_at(i, led_count);
+        rgb_color_t color = hsv_to_rgb(hue, 0.92f, value);
+        led_out_pixel(i, color);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t rainbow_effect(float *energy_bands, int num_bands)
+{
+    (void)energy_bands;
+    (void)num_bands;
+    for (int i = 0; i < led_count; i++) {
+        float hue = (float)(i + animation_counter / 10.0) / led_count;
+        hue = hue - (int)hue;
+        rgb_color_t color = hsv_to_rgb(hue, 1.0, 0.5);
+        led_out_pixel(i, color);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t debug_effect(float *energy_bands, int num_bands)
+{
+    (void)energy_bands;
+    (void)num_bands;
+    for (int i = 0; i < led_count; i++) {
+        rgb_color_t color = {0, 0, 0};
+        int segment = led_count > 0 ? i / (led_count / 3 + 1) : 0;
+        switch (segment) {
+            case 0: color.r = 100; break;
+            case 1: color.g = 100; break;
+            case 2: color.b = 100; break;
+        }
+        led_out_pixel(i, color);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t led_off_effect(float *energy_bands, int num_bands)
+{
+    (void)energy_bands;
+    (void)num_bands;
+    clear_color_buffer();
+    return apply_color_buffer();
+}
+
+typedef struct {
+    led_mode_t mode;
+    esp_err_t (*render)(float *energy_bands, int num_bands);
+} led_effect_entry_t;
+
+static const led_effect_entry_t s_led_effects[] = {
+    { MODE_SPECTRUM, spectrum_effect },
+    { MODE_RAINBOW, rainbow_effect },
+    { MODE_DEBUG, debug_effect },
+    { MODE_METEOR_PULSE, meteor_pulse_effect },
+    { MODE_WATER_RIPPLE, water_ripple_effect },
+    { MODE_ENERGY_WAVE, energy_wave_effect },
+    { MODE_FIREWORKS, fireworks_effect_improved },
+    { MODE_RHYTHM_PULSE, rhythm_pulse_effect },
+    { MODE_RHYTHM_BREATH, rhythm_breath_effect },
+    { MODE_RHYTHM_JUMP, rhythm_jump_effect },
+    { MODE_SPARKLE_RAINBOW, sparkle_rainbow_effect },
+    { MODE_EXPLOSION, explosion_collision_effect },
+    { MODE_PEAK_HOLD, peak_hold_effect },
+    { MODE_OFF, led_off_effect },
+};
+
+#define LED_EFFECT_COUNT (sizeof(s_led_effects) / sizeof(s_led_effects[0]))
+
+esp_err_t led_update_visualization(float *energy_bands, int num_bands)
+{
+    if (!strip) return ESP_ERR_INVALID_STATE;
+
+    if (current_mode != MODE_RAINBOW && current_mode != MODE_DEBUG &&
         current_mode != MODE_OFF && energy_bands == NULL) {
-        // 对于需要音频数据的模式，如果传入NULL，使用零数组
         static float zero_bands[NUM_FREQ_BANDS] = {0};
         energy_bands = zero_bands;
         num_bands = NUM_FREQ_BANDS;
     }
-    
+
     animation_counter++;
-    
-    switch (current_mode) {
-        case MODE_SPECTRUM: {
-            // 频谱显示模式 - 增强版
-            static float max_energy_history = 0.0f;
-            
-            // 1. 避免第0个频带（通常是直流或极低频）
-            int effective_bands = num_bands - 1; // 跳过第0个频带
-            if (effective_bands <= 0) effective_bands = 1;
-            
-            // 2. 查找当前帧的有效最大能量（从第1个频带开始）
-            float current_max = 0.0f;
-            for (int b = 1; b < num_bands; b++) {
-                float val = energy_bands[b];
-                if (val > current_max) current_max = val;
-            }
-            
-            // 3. 更新历史最大值（有衰减）
-            if (current_max > max_energy_history) {
-                max_energy_history = current_max;
-            } else {
-                max_energy_history = max_energy_history * 0.995f;
-                if (max_energy_history < 1.0f) max_energy_history = 1.0f;
-            }
-            
-            // 4. 计算动态归一化参数
-            float dynamic_range = max_energy_history;
-            if (dynamic_range < 1.0f) dynamic_range = 1.0f;
-            
-            // 5. 为每个LED设置颜色（从第1个频带开始映射）
-            for (int i = 0; i < led_count; i++) {
-                // 映射到有效频带（1到num_bands-1）
-                int band_idx = (i * effective_bands) / led_count + 1;
-                if (band_idx >= num_bands) band_idx = num_bands - 1;
-                
-                float energy = energy_bands[band_idx];
-                
-                // 动态归一化到0-1范围
-                float normalized_energy = energy / dynamic_range;
-                
-                // 非线性变换增强对比度
-                float scaled = sqrtf(normalized_energy);
-                
-                // 确保在有效范围内
-                if (scaled > 1.0f) scaled = 1.0f;
-                if (scaled < 0.0f) scaled = 0.0f;
-                
-                // 增强亮度：设置最小亮度为30%，避免全黑
-                scaled = scaled * 0.7f + 0.3f;
-                
-                // 颜色映射
-                rgb_color_t color;
-                
-                if (scaled < 0.5f) {
-                    // 低能量：蓝色
-                    float blue_intensity = scaled * 2.0f;
-                    color.r = 0;
-                    color.g = 0;
-                    color.b = (uint8_t)(blue_intensity * 255);
-                } else if (scaled < 0.8f) {
-                    // 中能量：绿色
-                    float green_intensity = (scaled - 0.5f) * 3.33f;
-                    color.r = 0;
-                    color.g = (uint8_t)(green_intensity * 255);
-                    color.b = (uint8_t)((1.0f - green_intensity) * 255);
-                } else {
-                    // 高能量：红色
-                    float red_intensity = (scaled - 0.8f) * 5.0f;
-                    color.r = (uint8_t)(red_intensity * 255);
-                    color.g = (uint8_t)((1.0f - red_intensity) * 255);
-                    color.b = 0;
-                }
-                
-                // 确保颜色足够亮
-                if (color.r < 30 && color.g < 30 && color.b < 30) {
-                    color.r = 0;
-                    color.g = 0;
-                    color.b = 50;
-                }
-                
-                led_strip_set_pixel(strip, i, color.r, color.g, color.b);
-            }
-            break;
-        }
-            
-        case MODE_RAINBOW:
-            // 彩虹模式
-            for (int i = 0; i < led_count; i++) {
-                float hue = (float)(i + animation_counter / 10.0) / led_count;
-                hue = hue - (int)hue;
-                
-                rgb_color_t color = hsv_to_rgb(hue, 1.0, 0.5);
-                led_strip_set_pixel(strip, i, color.r, color.g, color.b);
-            }
-            break;
-            
-        case MODE_DEBUG:
-            // 调试模式：显示红绿蓝测试
-            for (int i = 0; i < led_count; i++) {
-                rgb_color_t color = {0, 0, 0};
-                int segment = i / (led_count / 3);
-                
-                switch (segment) {
-                    case 0: color.r = 100; break;
-                    case 1: color.g = 100; break;
-                    case 2: color.b = 100; break;
-                }
-                
-                led_strip_set_pixel(strip, i, color.r, color.g, color.b);
-            }
-            break;
-            
-        case MODE_METEOR_PULSE: {
-            // 流星脉冲效果
-            esp_err_t ret = meteor_pulse_effect(energy_bands, num_bands);
+
+    led_beat_update(energy_bands, num_bands);
+
+    for (size_t i = 0; i < LED_EFFECT_COUNT; i++) {
+        if (s_led_effects[i].mode == current_mode) {
+            esp_err_t ret = s_led_effects[i].render(energy_bands, num_bands);
             if (ret != ESP_OK) return ret;
-            break;
+            return led_strip_refresh(strip);
         }
-        
-         case MODE_WATER_RIPPLE:
-            // 增强版水波纹效果（真正的动态水波纹）
-            return water_ripple_effect(energy_bands, num_bands);
-            
-        case MODE_ENERGY_WAVE:
-            // 增强版能量波效果（真正的动态频谱均衡器）
-            return energy_wave_effect(energy_bands, num_bands);
-            
-        case MODE_FIREWORKS:
-            // 新增：烟花效果
-            return fireworks_effect_improved(energy_bands, num_bands);
-            
-        case MODE_RHYTHM_PULSE:
-            // 新增：节奏脉冲效果
-            return rhythm_pulse_effect(energy_bands, num_bands);
-         
-        case MODE_RHYTHM_BREATH:
-            // 新增：节奏闪烁模式
-            return rhythm_breath_effect(energy_bands, num_bands);
-    
-        case MODE_RHYTHM_JUMP:
-            // 新增：节奏跳动效果
-            return rhythm_jump_effect(energy_bands, num_bands);
-    
-        case MODE_SPARKLE_RAINBOW:
-            // 新增：闪烁彩虹流水效果
-            return sparkle_rainbow_effect(energy_bands, num_bands);
-    
-        case MODE_EXPLOSION:
-            // 新增：爆炸碰撞效果
-            return explosion_collision_effect(energy_bands, num_bands); 
-        default:
-            // 其他模式：关闭
-            led_clear_all();
-            return ESP_OK;
     }
-    
+
+    led_clear_all();
     return led_strip_refresh(strip);
 }

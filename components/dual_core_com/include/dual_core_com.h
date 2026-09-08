@@ -16,7 +16,9 @@ typedef enum {
     CMD_MODE_CHANGE,      // 模式切换命令
     CMD_BRIGHTNESS_UP,    // 增加亮度
     CMD_BRIGHTNESS_DOWN,  // 降低亮度
+    CMD_BRIGHTNESS_SET,   // 设置亮度（data.param.value: 0-100）
     CMD_TEST_RAINBOW,     // 测试彩虹
+    CMD_POST_SET,         // 设置全局后处理参数（data.post）
     CMD_SET_PARAM,        // 设置参数
     CMD_GET_STATUS        // 获取状态
 } core_command_type_t;
@@ -30,6 +32,11 @@ typedef struct {
             char key[32];             // 参数键
             int value;                // 参数值
         } param;
+        struct {
+            float gamma;              // 1.0-2.5
+            uint8_t gate;             // 0-64 噪声门
+            float afterimage;         // 0-0.9 余晖
+        } post;
     } data;
 } core_command_t;
 
@@ -39,6 +46,13 @@ typedef struct {
     bool wifi_connected;              // WiFi连接状态
     uint32_t led_frame_count;         // LED帧计数
     uint32_t free_heap_size;          // 空闲堆内存
+    uint8_t brightness;               // 当前亮度（0-100）
+    uint16_t bpm;                     // 估计节拍 BPM
+    uint8_t pulse;                    // 节拍脉冲包络（0-100）
+    float energy;                     // 全带平均能量
+    float gamma;                      // 后处理 gamma
+    uint8_t gate;                     // 后处理噪声门
+    float afterimage;                 // 后处理余晖
 } core_status_t;
 
 // 音频数据结构

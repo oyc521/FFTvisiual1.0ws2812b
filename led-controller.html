@@ -1,1482 +1,461 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LED控制器</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Arial', 'Microsoft YaHei', sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            color: #e0e0e0;
-            min-height: 100vh;
-            padding: 20px;
-        }
-        
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        
-        header {
-            text-align: center;
-            margin-bottom: 30px;
-            padding-bottom: 20px;
-            border-bottom: 2px solid #2d4059;
-        }
-        
-        h1 {
-            color: #4d96ff;
-            font-size: 2.5rem;
-            margin-bottom: 10px;
-            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-        }
-        
-        .subtitle {
-            color: #7d9dff;
-            font-size: 1.2rem;
-        }
-        
-        .status-bar {
-            display: flex;
-            justify-content: space-around;
-            background: rgba(45, 64, 89, 0.5);
-            border-radius: 10px;
-            padding: 15px;
-            margin-bottom: 30px;
-            flex-wrap: wrap;
-            gap: 15px;
-        }
-        
-        .status-item {
-            text-align: center;
-            flex: 1;
-            min-width: 120px;
-            position: relative;
-        }
-        
-        .status-label {
-            color: #7d9dff;
-            font-size: 0.9rem;
-            margin-bottom: 5px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 5px;
-        }
-        
-        .status-value {
-            color: #4d96ff;
-            font-size: 1.2rem;
-            font-weight: bold;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-        }
-        
-        .ip-edit-btn {
-            background: none;
-            border: none;
-            color: #7d9dff;
-            cursor: pointer;
-            font-size: 0.9rem;
-            padding: 2px 6px;
-            border-radius: 4px;
-            transition: all 0.2s ease;
-        }
-        
-        .ip-edit-btn:hover {
-            background: rgba(77, 150, 255, 0.2);
-            color: #4d96ff;
-        }
-        
-        .modes-section {
-            margin-bottom: 40px;
-        }
-        
-        .section-title {
-            color: #4d96ff;
-            font-size: 1.8rem;
-            margin-bottom: 20px;
-            padding-bottom: 10px;
-            border-bottom: 1px solid #2d4059;
-        }
-        
-        .mode-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-            gap: 15px;
-            margin-bottom: 30px;
-        }
-        
-        .mode-button {
-            background: linear-gradient(135deg, #2d4059 0%, #1a1a2e 100%);
-            border: 2px solid #4d96ff;
-            border-radius: 10px;
-            padding: 20px;
-            color: #e0e0e0;
-            font-size: 1.1rem;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            text-align: center;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-        
-        .mode-button:hover {
-            background: linear-gradient(135deg, #4d96ff 0%, #2d4059 100%);
-            transform: translateY(-2px);
-            box-shadow: 0 6px 12px rgba(77, 150, 255, 0.3);
-        }
-        
-        .mode-button.active {
-            background: linear-gradient(135deg, #4d96ff 0%, #2a5fff 100%);
-            border-color: #2a5fff;
-            color: white;
-            box-shadow: 0 0 15px rgba(77, 150, 255, 0.5);
-        }
-        
-        .mode-button .mode-desc {
-            font-size: 0.9rem;
-            color: #a0c1ff;
-            margin-top: 8px;
-            opacity: 0.8;
-        }
-        
-        .control-section {
-            background: rgba(45, 64, 89, 0.3);
-            border-radius: 15px;
-            padding: 25px;
-            margin-top: 20px;
-        }
-        
-        .control-buttons {
-            display: flex;
-            gap: 15px;
-            flex-wrap: wrap;
-            justify-content: center;
-        }
-        
-        .control-button {
-            padding: 12px 24px;
-            border: none;
-            border-radius: 8px;
-            font-size: 1rem;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            min-width: 120px;
-        }
-        
-        .primary-btn {
-            background: linear-gradient(135deg, #4d96ff 0%, #2a5fff 100%);
-            color: white;
-        }
-        
-        .secondary-btn {
-            background: linear-gradient(135deg, #ff6b6b 0%, #ff2e2e 100%);
-            color: white;
-        }
-        
-        .test-btn {
-            background: linear-gradient(135deg, #6bff8d 0%, #2eff5e 100%);
-            color: white;
-        }
-        
-        .config-btn {
-            background: linear-gradient(135deg, #ffb142 0%, #ff9f1a 100%);
-            color: white;
-        }
-        
-        .control-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-        }
-        
-        .info-panel {
-            background: rgba(26, 26, 46, 0.7);
-            border-radius: 10px;
-            padding: 20px;
-            margin-top: 30px;
-        }
-        
-        .info-panel h3 {
-            color: #4d96ff;
-            margin-bottom: 15px;
-        }
-        
-        .info-panel p {
-            line-height: 1.6;
-            margin-bottom: 10px;
-        }
-        
-        footer {
-            text-align: center;
-            margin-top: 50px;
-            color: #7d9dff;
-            font-size: 0.9rem;
-            padding-top: 20px;
-            border-top: 1px solid #2d4059;
-        }
-        
-        .response-box {
-            background: rgba(26, 26, 46, 0.9);
-            border-radius: 8px;
-            padding: 15px;
-            margin-top: 20px;
-            font-family: monospace;
-            font-size: 0.9rem;
-            color: #a0c1ff;
-            border-left: 4px solid #4d96ff;
-            max-height: 200px;
-            overflow-y: auto;
-        }
-        
-        /* AP配网模式样式 */
-        .ap-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(26, 26, 46, 0.95);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 2000;
-            padding: 20px;
-        }
-        
-        .ap-overlay.active {
-            display: flex;
-        }
-        
-        .ap-modal {
-            background: linear-gradient(135deg, #2d4059 0%, #1a1a2e 100%);
-            border-radius: 15px;
-            padding: 30px;
-            width: 100%;
-            max-width: 600px;
-            border: 2px solid #4d96ff;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-        }
-        
-        .ap-title {
-            color: #4d96ff;
-            font-size: 2rem;
-            text-align: center;
-            margin-bottom: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 15px;
-        }
-        
-        .ap-steps {
-            background: rgba(26, 26, 46, 0.7);
-            border-radius: 10px;
-            padding: 25px;
-            margin: 25px 0;
-        }
-        
-        .step {
-            display: flex;
-            align-items: flex-start;
-            margin-bottom: 25px;
-            padding-bottom: 25px;
-            border-bottom: 1px solid #2d4059;
-        }
-        
-        .step:last-child {
-            border-bottom: none;
-            margin-bottom: 0;
-            padding-bottom: 0;
-        }
-        
-        .step-number {
-            background: #4d96ff;
-            color: white;
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            flex-shrink: 0;
-            margin-right: 15px;
-        }
-        
-        .step-content h4 {
-            color: #7d9dff;
-            margin-bottom: 8px;
-            font-size: 1.2rem;
-        }
-        
-        .step-content p {
-            color: #a0c1ff;
-            line-height: 1.5;
-        }
-        
-        .hotspot-info {
-            background: rgba(77, 150, 255, 0.1);
-            border: 1px solid #4d96ff;
-            border-radius: 8px;
-            padding: 15px;
-            margin: 20px 0;
-        }
-        
-        .hotspot-info p {
-            margin: 8px 0;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .hotspot-info strong {
-            color: #4d96ff;
-            min-width: 120px;
-        }
-        
-        .wifi-form {
-            background: rgba(26, 26, 46, 0.7);
-            border-radius: 10px;
-            padding: 25px;
-            margin-top: 20px;
-        }
-        
-        .form-row {
-            display: flex;
-            gap: 15px;
-            margin-bottom: 15px;
-        }
-        
-        .form-group {
-            flex: 1;
-        }
-        
-        .form-label {
-            display: block;
-            color: #7d9dff;
-            margin-bottom: 8px;
-            font-size: 0.95rem;
-        }
-        
-        .form-input {
-            width: 100%;
-            padding: 12px 15px;
-            border: 1px solid #2d4059;
-            border-radius: 8px;
-            background: rgba(26, 26, 46, 0.9);
-            color: #e0e0e0;
-            font-size: 1rem;
-        }
-        
-        .form-input:focus {
-            outline: none;
-            border-color: #4d96ff;
-            box-shadow: 0 0 0 3px rgba(77, 150, 255, 0.2);
-        }
-        
-        .ap-buttons {
-            display: flex;
-            gap: 15px;
-            margin-top: 25px;
-        }
-        
-        .ap-button {
-            flex: 1;
-            padding: 14px;
-            border: none;
-            border-radius: 8px;
-            font-size: 1rem;
-            font-weight: bold;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-        
-        .ap-cancel {
-            background: rgba(255, 107, 107, 0.2);
-            color: #ff6b6b;
-        }
-        
-        .ap-cancel:hover {
-            background: rgba(255, 107, 107, 0.3);
-        }
-        
-        .ap-submit {
-            background: linear-gradient(135deg, #4d96ff 0%, #2a5fff 100%);
-            color: white;
-        }
-        
-        .ap-submit:hover {
-            background: linear-gradient(135deg, #2a5fff 0%, #4d96ff 100%);
-        }
-        
-        .ap-submit:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-        
-        .result-message {
-            background: rgba(26, 26, 46, 0.9);
-            border-radius: 8px;
-            padding: 20px;
-            margin-top: 20px;
-            border-left: 4px solid #4d96ff;
-            display: none;
-        }
-        
-        .result-message.success {
-            border-left-color: #6bff8d;
-            background: rgba(107, 255, 141, 0.1);
-        }
-        
-        .result-message.error {
-            border-left-color: #ff6b6b;
-            background: rgba(255, 107, 107, 0.1);
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESP32-S3 音频可视化控制台</title>
+<style>
+    :root {
+        --bg0: #0b1020;
+        --bg1: #141b34;
+        --card: rgba(255,255,255,0.045);
+        --card-bd: rgba(255,255,255,0.09);
+        --text: #e6ecff;
+        --muted: #8aa0c8;
+        --accent: #4d9dff;
+        --accent2: #b06bff;
+        --ok: #35e0a1;
+        --warn: #ffb142;
+        --err: #ff5d73;
+        --radius: 16px;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    html,body { height:100%; }
+    body {
+        font-family:'Segoe UI','Microsoft YaHei',system-ui,sans-serif;
+        color:var(--text);
+        background:
+            radial-gradient(1200px 600px at 15% -10%, #1b2a5a 0%, transparent 60%),
+            radial-gradient(1000px 600px at 110% 10%, #3a1e66 0%, transparent 55%),
+            linear-gradient(160deg, var(--bg0), var(--bg1));
+        min-height:100vh;
+        padding:24px;
+    }
+    .wrap { max-width:1180px; margin:0 auto; }
 
-        /* IP地址配置模态框样式 */
-        .modal-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.7);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-            opacity: 0;
-            visibility: hidden;
-            transition: all 0.3s ease;
-        }
-        
-        .modal-overlay.active {
-            opacity: 1;
-            visibility: visible;
-        }
-        
-        .modal {
-            background: linear-gradient(135deg, #1a1a2e 0%, #2d4059 100%);
-            border-radius: 15px;
-            padding: 30px;
-            width: 90%;
-            max-width: 500px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-            border: 1px solid #4d96ff;
-            transform: translateY(-20px);
-            transition: transform 0.3s ease;
-        }
-        
-        .modal-overlay.active .modal {
-            transform: translateY(0);
-        }
-        
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            border-bottom: 1px solid #2d4059;
-            padding-bottom: 15px;
-        }
-        
-        .modal-title {
-            color: #4d96ff;
-            font-size: 1.5rem;
-        }
-        
-        .modal-close {
-            background: none;
-            border: none;
-            color: #ff6b6b;
-            font-size: 1.5rem;
-            cursor: pointer;
-            padding: 5px;
-        }
-        
-        .modal-buttons {
-            display: flex;
-            gap: 15px;
-            justify-content: flex-end;
-            margin-top: 25px;
-        }
-        
-        .modal-button {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 1rem;
-            transition: all 0.2s ease;
-        }
-        
-        .modal-cancel {
-            background: rgba(255, 107, 107, 0.2);
-            color: #ff6b6b;
-        }
-        
-        .modal-cancel:hover {
-            background: rgba(255, 107, 107, 0.3);
-        }
-        
-        .modal-save {
-            background: linear-gradient(135deg, #4d96ff 0%, #2a5fff 100%);
-            color: white;
-        }
-        
-        .modal-save:hover {
-            background: linear-gradient(135deg, #2a5fff 0%, #4d96ff 100%);
-        }
-        
-        /* 快速IP按钮样式 */
-        .quick-ip-buttons {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 10px;
-            margin-top: 15px;
-        }
-        
-        .quick-ip-btn {
-            padding: 8px;
-            background: rgba(77, 150, 255, 0.1);
-            border: 1px solid rgba(77, 150, 255, 0.3);
-            border-radius: 6px;
-            color: #a0c1ff;
-            cursor: pointer;
-            font-size: 0.9rem;
-            transition: all 0.2s ease;
-        }
-        
-        .quick-ip-btn:hover {
-            background: rgba(77, 150, 255, 0.2);
-            border-color: #4d96ff;
-        }
-        
-        /* AP模式状态指示器 */
-        .ap-indicator {
-            display: inline-flex;
-            align-items: center;
-            background: rgba(255, 178, 66, 0.2);
-            color: #ffb142;
-            padding: 4px 10px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            margin-left: 10px;
-            animation: pulse 2s infinite;
-        }
-        
-        @keyframes pulse {
-            0% { opacity: 0.7; }
-            50% { opacity: 1; }
-            100% { opacity: 0.7; }
-        }
-        
-        @media (max-width: 768px) {
-            .mode-grid {
-                grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            }
-            
-            .control-buttons {
-                flex-direction: column;
-                align-items: center;
-            }
-            
-            .control-button {
-                width: 100%;
-                max-width: 300px;
-            }
-            
-            .quick-ip-buttons {
-                grid-template-columns: repeat(2, 1fr);
-            }
-            
-            .form-row {
-                flex-direction: column;
-            }
-        }
-        
-        @media (max-width: 480px) {
-            .mode-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            h1 {
-                font-size: 2rem;
-            }
-            
-            .status-bar {
-                flex-direction: column;
-                align-items: center;
-            }
-            
-            .status-item {
-                min-width: 100%;
-            }
-            
-            .ap-modal {
-                padding: 20px;
-            }
-        }
-    </style>
+    header { display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:22px; }
+    .logo {
+        width:46px; height:46px; border-radius:14px; flex:0 0 auto;
+        background:conic-gradient(from 200deg, var(--accent), var(--accent2), var(--accent));
+        box-shadow:0 8px 30px rgba(77,157,255,0.35);
+        display:grid; place-items:center; font-size:22px;
+    }
+    header h1 { font-size:1.5rem; font-weight:700; letter-spacing:.5px; }
+    header .sub { color:var(--muted); font-size:.85rem; }
+    .head-right { margin-left:auto; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+
+    .pill {
+        display:inline-flex; align-items:center; gap:7px;
+        padding:8px 12px; border-radius:999px; font-size:.82rem;
+        background:var(--card); border:1px solid var(--card-bd); color:var(--muted);
+    }
+    .dot { width:9px; height:9px; border-radius:50%; background:var(--err); box-shadow:0 0 10px currentColor; }
+    .dot.on { background:var(--ok); }
+    .dot.ap { background:var(--warn); }
+
+    .grid { display:grid; grid-template-columns:1.5fr 1fr; gap:18px; align-items:start; }
+    @media (max-width:900px){ .grid { grid-template-columns:1fr; } }
+
+    .card {
+        background:var(--card); border:1px solid var(--card-bd);
+        border-radius:var(--radius); padding:18px; margin-bottom:18px;
+        backdrop-filter:blur(8px);
+        box-shadow:0 10px 40px rgba(0,0,0,0.25);
+    }
+    .card h2 { font-size:.8rem; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1.5px; margin-bottom:14px; display:flex; align-items:center; gap:8px;}
+    .card h2 .bar { width:4px; height:14px; border-radius:2px; background:linear-gradient(var(--accent),var(--accent2)); }
+
+    .modes { display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:10px; }
+    .mode {
+        position:relative; cursor:pointer; user-select:none; text-align:center;
+        padding:14px 8px; border-radius:14px; font-size:.82rem; font-weight:600;
+        background:rgba(255,255,255,0.05); border:1px solid var(--card-bd);
+        transition:transform .12s ease, background .2s, border-color .2s, box-shadow .2s;
+    }
+    .mode .ic { display:block; font-size:20px; margin-bottom:6px; }
+    .mode .idx { position:absolute; top:5px; right:8px; font-size:.62rem; color:var(--muted); opacity:.7; }
+    .mode:hover { transform:translateY(-3px); background:rgba(255,255,255,0.09); }
+    .mode.active {
+        background:linear-gradient(150deg, rgba(77,157,255,.30), rgba(176,107,255,.30));
+        border-color:var(--accent); box-shadow:0 8px 26px rgba(77,157,255,.25);
+    }
+    .mode.active::after {
+        content:''; position:absolute; left:12px; right:12px; bottom:6px; height:2px; border-radius:2px;
+        background:linear-gradient(90deg,var(--accent),var(--accent2));
+    }
+
+    .row { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+    .row + .row { margin-top:14px; }
+    .field { display:flex; flex-direction:column; gap:6px; flex:1 1 160px; min-width:130px; }
+    .field label { font-size:.78rem; color:var(--muted); display:flex; justify-content:space-between; }
+    .field label b { color:var(--text); font-variant-numeric:tabular-nums; }
+
+    input[type=range]{ -webkit-appearance:none; appearance:none; height:6px; border-radius:6px;
+        background:linear-gradient(90deg,var(--accent),var(--accent2)); outline:none; }
+    input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:18px; height:18px; border-radius:50%;
+        background:#fff; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,.4); border:3px solid var(--accent); }
+    input[type=range]::-moz-range-thumb{ width:16px; height:16px; border-radius:50%; background:#fff; cursor:pointer; border:3px solid var(--accent);}
+
+    input[type=text],input[type=password]{
+        width:100%; padding:10px 12px; border-radius:10px; background:rgba(0,0,0,0.25);
+        border:1px solid var(--card-bd); color:var(--text); font-size:.9rem; }
+    input:focus{ outline:none; border-color:var(--accent); }
+
+    .btn {
+        cursor:pointer; border:none; border-radius:11px; padding:10px 15px; font-size:.85rem; font-weight:600;
+        color:var(--text); background:rgba(255,255,255,0.08); border:1px solid var(--card-bd);
+        transition:transform .1s, background .2s;
+    }
+    .btn:hover{ background:rgba(255,255,255,0.14); transform:translateY(-2px); }
+    .btn.primary{ background:linear-gradient(150deg,var(--accent),var(--accent2)); border:none; }
+    .btn.ghost{ background:transparent; }
+    .btn:disabled{ opacity:.45; cursor:not-allowed; transform:none; }
+
+    .meter { display:flex; align-items:center; gap:10px; margin-top:4px; }
+    .bar-track{ flex:1; height:8px; border-radius:6px; background:rgba(255,255,255,0.08); overflow:hidden; }
+    .bar-fill{ height:100%; width:0%; background:linear-gradient(90deg,var(--ok),var(--accent)); transition:width .1s linear; }
+    .pulse-lamp{ width:14px; height:14px; border-radius:50%; background:var(--accent2); box-shadow:0 0 0 rgba(176,107,255,.6); transition:transform .05s, box-shadow .1s; }
+    .beat{ display:flex; justify-content:space-between; font-size:.78rem; color:var(--muted); margin-top:2px;}
+    .beat b{ color:var(--text); font-variant-numeric:tabular-nums; }
+
+    .prog{ height:10px; border-radius:6px; background:rgba(255,255,255,0.08); overflow:hidden; margin-top:10px; }
+    .prog > div{ height:100%; width:0%; background:linear-gradient(90deg,var(--ok),var(--accent)); transition:width .2s; }
+
+    .logbox{ height:150px; overflow-y:auto; font-size:.78rem; line-height:1.55; background:rgba(0,0,0,0.28);
+        border:1px solid var(--card-bd); border-radius:12px; padding:10px 12px; font-family:ui-monospace,Consolas,monospace; }
+    .logbox .t{ color:var(--muted); }
+    .logbox .ok{ color:var(--ok);} .logbox .err{ color:var(--err);} .logbox .info{ color:var(--accent);}
+
+    .hint{ font-size:.75rem; color:var(--muted); margin-top:8px; line-height:1.5;}
+    .badge{ font-size:.72rem; padding:2px 8px; border-radius:999px; background:rgba(77,157,255,.16); color:#bcd6ff; border:1px solid rgba(77,157,255,.3);}
+    .ip-edit{ display:inline-flex; align-items:center; gap:6px; font-family:ui-monospace,monospace; }
+    footer{ text-align:center; color:var(--muted); font-size:.75rem; margin-top:8px; }
+    a{ color:var(--accent); }
+</style>
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>🎛️ LED控制器</h1>
-            <p class="subtitle">音频响应LED灯带控制系统</p>
-        </header>
-        
-        <div class="status-bar">
-            <div class="status-item">
-                <div class="status-label">当前模式</div>
-                <div class="status-value" id="current-mode">未连接</div>
-            </div>
-            <div class="status-item">
-                <div class="status-label">WiFi状态</div>
-                <div class="status-value" id="wifi-status">未连接</div>
-            </div>
-            <div class="status-item">
-                <div class="status-label">
-                    <span>设备IP</span>
-                    <button class="ip-edit-btn" id="ip-edit-icon" title="修改IP地址">✏️</button>
-                </div>
-                <div class="status-value">
-                    <span id="device-ip">-</span>
-                </div>
-            </div>
-            <div class="status-item">
-                <div class="status-label">帧率</div>
-                <div class="status-value" id="frame-rate">-</div>
-            </div>
+<div class="wrap">
+    <header>
+        <div class="logo">🎚️</div>
+        <div>
+            <h1>音频可视化控制台</h1>
+            <div class="sub">ESP32-S3 · 双核 · FFT 频谱灯效</div>
         </div>
-        
-        <div class="modes-section">
-            <h2 class="section-title">🎨 灯光模式选择</h2>
-            
-            <h3 style="color: #7d9dff; margin: 20px 0 10px;">🎯 基础模式</h3>
-            <div class="mode-grid">
-                <div class="mode-button" data-mode="0">
-                    频谱显示
-                    <div class="mode-desc">音频频谱可视化</div>
-                </div>
-                <div class="mode-button" data-mode="1">
-                    彩虹效果
-                    <div class="mode-desc">流动彩虹色彩</div>
-                </div>
-                <div class="mode-button" data-mode="2">
-                    调试模式
-                    <div class="mode-desc">红绿蓝测试</div>
-                </div>
-                <div class="mode-button" data-mode="3">
-                    流星脉冲
-                    <div class="mode-desc">流星划过效果</div>
-                </div>
-            </div>
-            
-            <h3 style="color: #7d9dff; margin: 20px 0 10px;">🌊 增强模式</h3>
-            <div class="mode-grid">
-                <div class="mode-button" data-mode="4">
-                    水波纹效果
-                    <div class="mode-desc">动态水波纹扩散</div>
-                </div>
-                <div class="mode-button" data-mode="5">
-                    能量波效果
-                    <div class="mode-desc">频谱均衡器显示</div>
-                </div>
-                <div class="mode-button" data-mode="6">
-                    烟花效果
-                    <div class="mode-desc">音乐触发烟花</div>
-                </div>
-                <div class="mode-button" data-mode="7">
-                    节奏脉冲
-                    <div class="mode-desc">随机发射脉冲</div>
-                </div>
-            </div>
-            
-            <h3 style="color: #7d9dff; margin: 20px 0 10px;">✨ 新增模式</h3>
-            <div class="mode-grid">
-                <div class="mode-button" data-mode="8">
-                    节奏闪烁
-                    <div class="mode-desc">呼吸+节拍闪烁</div>
-                </div>
-                <div class="mode-button" data-mode="9">
-                    节奏跳动
-                    <div class="mode-desc">物理模拟跳动</div>
-                </div>
-                <div class="mode-button" data-mode="10">
-                    闪烁彩虹流水
-                    <div class="mode-desc">彩虹背景+流动颗粒</div>
-                </div>
-                <div class="mode-button" data-mode="11">
-                    爆炸碰撞
-                    <div class="mode-desc">离子对撞爆炸效果</div>
-                </div>
-            </div>
+        <div class="head-right">
+            <span class="pill"><span class="dot" id="conn-dot"></span><span id="conn-text">未连接</span></span>
+            <span class="pill ip-edit">📡 <span id="ip-label">—</span> <button class="btn ghost" style="padding:3px 8px" onclick="openIp()">改</button></span>
         </div>
-        
-        <div class="control-section">
-            <h2 class="section-title">🕹️ 控制面板</h2>
-            
-            <div class="control-buttons">
-                <button class="control-button primary-btn" id="refresh-btn">
-                    🔄 刷新状态
-                </button>
-                <button class="control-button test-btn" id="rainbow-btn">
-                    🌈 测试彩虹
-                </button>
-                <button class="control-button secondary-btn" id="off-btn">
-                    ⚫ 关闭所有
-                </button>
-                <button class="control-button primary-btn" id="ping-btn">
-                    📡 连接测试
-                </button>
-                <button class="control-button config-btn" id="config-btn">
-                    ⚙️ 配置IP地址
-                </button>
-                <button class="control-button config-btn" id="ap-provision-btn">
-                    📶 配网模式
-                </button>
-            </div>
-            
-            <div class="response-box" id="response-box">
-                <div>系统就绪，请选择灯光模式...</div>
-            </div>
-        </div>
-        
-        <div class="info-panel">
-            <h3>💡 使用说明</h3>
-            <p>1. 点击模式按钮切换LED效果，当前激活模式会高亮显示</p>
-            <p>2. 模式8-11为新增特效模式，具有独特的音乐响应效果</p>
-            <p>3. 使用控制面板按钮进行测试和系统操作</p>
-            <p>4. 状态栏实时显示设备连接和运行状态</p>
-            <p>5. 点击IP地址旁边的✏️图标或使用"配置IP地址"按钮修改设备IP</p>
-            <p>6. 点击"配网模式"按钮为新设备配置WiFi网络</p>
-            <p>7. 响应框显示操作结果和系统消息</p>
-        </div>
-        
-        <footer>
-            <p>LED控制器 v2.1 | 支持12种灯光模式 | 音频响应可视化系统</p>
-            <p>©  LED控制器项目 | 基于ESP32开发</p>
-        </footer>
-    </div>
+    </header>
 
-    <!-- AP配网模态框 -->
-    <div class="ap-overlay" id="ap-overlay">
-        <div class="ap-modal">
-            <div class="ap-title">
-                <span>📶 设备配网向导</span>
+    <div class="grid">
+        <div>
+            <div class="card">
+                <h2><span class="bar"></span>显示模式</h2>
+                <div class="modes" id="modes"></div>
             </div>
-            
-            <div class="ap-steps">
-                <div class="step">
-                    <div class="step-number">1</div>
-                    <div class="step-content">
-                        <h4>连接设备热点</h4>
-                        <p>请前往手机或电脑的WiFi设置，连接到设备的热点</p>
-                        <div class="hotspot-info" id="hotspot-info">
-                            <p><strong>热点名称:</strong> <span id="hotspot-ssid">正在检测...</span></p>
-                            <p><strong>热点密码:</strong> 12345678</p>
-                            <p><strong>热点IP:</strong> 192.168.4.1</p>
-                        </div>
+
+            <div class="card">
+                <h2><span class="bar"></span>视觉后处理</h2>
+                <div class="row">
+                    <div class="field">
+                        <label>对比 Gamma <b id="v-gamma">1.18</b></label>
+                        <input type="range" id="s-gamma" min="1.0" max="2.5" step="0.05" value="1.18">
+                    </div>
+                    <div class="field">
+                        <label>噪声门 <b id="v-gate">8</b></label>
+                        <input type="range" id="s-gate" min="0" max="64" step="1" value="8">
                     </div>
                 </div>
-                
-                <div class="step">
-                    <div class="step-number">2</div>
-                    <div class="step-content">
-                        <h4>配置家庭WiFi</h4>
-                        <p>连接成功后，在此页面输入您的家庭WiFi信息</p>
-                        <div class="wifi-form">
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label class="form-label">WiFi名称 (SSID)</label>
-                                    <input type="text" class="form-input" id="ap-ssid" 
-                                           placeholder="输入您的WiFi名称" required>
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label">WiFi密码</label>
-                                    <input type="password" class="form-input" id="ap-password" 
-                                           placeholder="输入WiFi密码（可选）">
-                                </div>
-                            </div>
-                        </div>
+                <div class="row">
+                    <div class="field">
+                        <label>余晖拖尾 <b id="v-after">0.62</b></label>
+                        <input type="range" id="s-after" min="0" max="0.9" step="0.01" value="0.62">
+                    </div>
+                    <button class="btn" style="align-self:flex-end" onclick="resetPost()">恢复默认</button>
+                </div>
+                <div class="hint">噪声门越大底色越黑、鼓点越突出；Gamma 越大明暗对比越强；余晖让运动带拖尾。</div>
+            </div>
+
+            <div class="card">
+                <h2><span class="bar"></span>固件升级 (OTA)</h2>
+                <div class="row">
+                    <button class="btn" onclick="pickFile()">📁 选择固件</button>
+                    <span id="ota-name" style="color:var(--muted);font-size:.85rem;">未选择 (.bin)</span>
+                    <input type="file" id="ota-file" accept=".bin" style="display:none">
+                </div>
+                <div class="row"><button class="btn primary" id="ota-btn" disabled onclick="startOta()">🚀 开始升级</button></div>
+                <div class="prog" id="ota-prog" style="display:none"><div id="ota-bar"></div></div>
+                <div id="ota-status" class="hint"></div>
+            </div>
+        </div>
+
+        <div>
+            <div class="card">
+                <h2><span class="bar"></span>实时信号</h2>
+                <div class="meter">
+                    <div class="pulse-lamp" id="pulse-lamp"></div>
+                    <div class="bar-track"><div class="bar-fill" id="energy-bar"></div></div>
+                    <span class="badge" id="bpm-badge">BPM --</span>
+                </div>
+                <div class="beat"><span>能量 <b id="m-energy">0</b></span><span>亮度 <b id="m-bright">--</b></span><span>帧率 <b id="m-fps">--</b></span></div>
+                <div class="row" style="margin-top:14px;">
+                    <div class="field" style="flex:1 1 100%">
+                        <label>亮度 <b id="v-bright">100%</b></label>
+                        <input type="range" id="s-bright" min="0" max="100" step="1" value="100">
                     </div>
                 </div>
-                
-                <div class="step">
-                    <div class="step-number">3</div>
-                    <div class="step-content">
-                        <h4>完成配置</h4>
-                        <p>提交后设备会自动重启并连接WiFi，请重新连接到您的家庭WiFi</p>
-                    </div>
+                <div class="row">
+                    <button class="btn" onclick="refresh()">🔄 刷新</button>
+                    <button class="btn" onclick="cmd('test_rainbow')">🌈 测试</button>
+                    <button class="btn" onclick="setMode(13)">⚫ 关闭</button>
+                    <button class="btn ghost" onclick="openProvision()">📶 配网</button>
                 </div>
             </div>
-            
-            <div class="result-message" id="ap-result"></div>
-            
-            <div class="ap-buttons">
-                <button class="ap-button ap-cancel" id="ap-cancel-btn">取消</button>
-                <button class="ap-button ap-submit" id="ap-submit-btn">🚀 提交配置</button>
+
+            <div class="card">
+                <h2><span class="bar"></span>运行状态</h2>
+                <div class="beat" style="font-size:.82rem">
+                    <span>版本 <b id="m-ver">--</b></span>
+                    <span>固件槽 <b id="m-slot">--</b></span>
+                    <span>空闲堆 <b id="m-heap">--</b></span>
+                </div>
+                <div class="beat" style="font-size:.82rem">
+                    <span>WiFi <b id="m-wifi">--</b></span>
+                    <span>模式 <b id="m-mode">--</b></span>
+                    <span>IP <b id="m-ip">--</b></span>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2><span class="bar"></span>日志</h2>
+                <div class="logbox" id="log"></div>
             </div>
         </div>
     </div>
+    <footer>本地页面直连设备 API · 请先用“改”设置设备 IP（AP 模式填 192.168.4.1）</footer>
+</div>
 
-    <!-- IP配置模态框 -->
-    <div class="modal-overlay" id="ip-modal">
-        <div class="modal">
-            <div class="modal-header">
-                <h3 class="modal-title">⚙️ 配置设备IP地址</h3>
-                <button class="modal-close" id="modal-close-btn">&times;</button>
-            </div>
-            
-            <div class="form-group">
-                <label class="form-label">设备IP地址</label>
-                <input type="text" class="form-input" id="ip-input" 
-                       placeholder="例如: 192.168.1.100" 
-                       pattern="^([0-9]{1,3}\.){3}[0-9]{1,3}$">
-                <div class="form-hint">请输入LED控制器的IP地址，格式为: XXX.XXX.XXX.XXX</div>
-            </div>
-            
-            <div class="form-group">
-                <label class="form-label">快速选择常用IP</label>
-                <div class="quick-ip-buttons">
-                    <button class="quick-ip-btn" data-ip="192.168.4.1">192.168.4.1 (AP模式)</button>
-                    <button class="quick-ip-btn" data-ip="192.168.1.100">192.168.1.100</button>
-                    <button class="quick-ip-btn" data-ip="192.168.1.150">192.168.1.150</button>
-                    <button class="quick-ip-btn" data-ip="192.168.0.100">192.168.0.100</button>
-                    <button class="quick-ip-btn" data-ip="10.0.0.100">10.0.0.100</button>
-                    <button class="quick-ip-btn" data-ip="192.168.2.1">192.168.2.1</button>
-                </div>
-            </div>
-            
-            <div class="modal-buttons">
-                <button class="modal-button modal-cancel" id="modal-cancel-btn">取消</button>
-                <button class="modal-button modal-save" id="modal-save-btn">保存并测试</button>
-            </div>
+<div id="ip-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);align-items:center;justify-content:center;z-index:50;">
+    <div class="card" style="width:min(360px,90vw);margin:0;">
+        <h2><span class="bar"></span>设备地址</h2>
+        <input type="text" id="ip-input" placeholder="例如 192.168.1.100 或 192.168.4.1">
+        <div class="row" style="margin-top:14px;justify-content:flex-end;">
+            <button class="btn ghost" onclick="closeIp()">取消</button>
+            <button class="btn primary" onclick="saveIp()">保存并连接</button>
+        </div>
+        <div class="quick-ip row" style="gap:8px;margin-top:10px;">
+            <button class="btn" style="padding:6px 10px;font-size:.78rem" onclick="setIpVal('192.168.4.1')">AP 192.168.4.1</button>
+            <button class="btn" style="padding:6px 10px;font-size:.78rem" onclick="setIpVal('10.88.161.126')">10.88.161.126</button>
         </div>
     </div>
+</div>
 
-    <script>
-        // 全局变量
-        let currentDeviceIP = '';
-        let currentMode = -1;
-        let refreshInterval = null;
-        let isApMode = false;
-        let apDeviceIP = '192.168.4.1';
-        
-        // 初始化函数
-        function init() {
-            loadLastIP();
-            bindEvents();
-            updateStatus();
-            
-            // 每5秒自动刷新状态
-            refreshInterval = setInterval(updateStatus, 5000);
-            
-            // 页面加载3秒后自动检测AP模式
-            setTimeout(() => {
-                checkApMode();
-            }, 3000);
+<div id="pv-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);align-items:center;justify-content:center;z-index:50;">
+    <div class="card" style="width:min(360px,90vw);margin:0;">
+        <h2><span class="bar"></span>WiFi 配网</h2>
+        <div class="field"><label>SSID</label><input type="text" id="pv-ssid"></div>
+        <div class="field" style="margin-top:10px;"><label>密码</label><input type="password" id="pv-pass"></div>
+        <div id="pv-tip" class="hint">需先连到设备热点“ESP32-S3-Visualizer”，地址使用 192.168.4.1。</div>
+        <div class="row" style="margin-top:14px;justify-content:flex-end;">
+            <button class="btn ghost" onclick="closeProvision()">取消</button>
+            <button class="btn primary" onclick="doProvision()">提交</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const MODES = [
+    {n:0,  ic:'📊', name:'频谱'},
+    {n:1,  ic:'🌈', name:'彩虹'},
+    {n:2,  ic:'🔧', name:'调试'},
+    {n:3,  ic:'☄️', name:'流星脉冲'},
+    {n:4,  ic:'💧', name:'水波纹'},
+    {n:5,  ic:'🌊', name:'能量波'},
+    {n:6,  ic:'🎆', name:'烟花'},
+    {n:7,  ic:'💥', name:'节奏脉冲'},
+    {n:8,  ic:'🫧', name:'节奏呼吸'},
+    {n:9,  ic:'🦘', name:'节奏跳动'},
+    {n:10, ic:'✨', name:'闪光彩虹'},
+    {n:11, ic:'🧨', name:'爆炸碰撞'},
+    {n:12, ic:'📈', name:'波峰余晖'},
+    {n:13, ic:'⚫', name:'关闭'}
+];
+
+let ip = localStorage.getItem('dev_ip') || '';
+let currentMode = -1;
+let timer = null;
+let busyPost = false, scrubPost = false, scrubBright = false;
+let otaFile = null;
+let fpsPrev = {c:0,t:0};
+
+function el(id){ return document.getElementById(id); }
+function log(msg, cls){
+    const box = el('log');
+    const time = new Date().toLocaleTimeString();
+    const div = document.createElement('div');
+    div.innerHTML = `<span class="t">[${time}]</span> <span class="${cls||''}">${msg}</span>`;
+    box.appendChild(div);
+    while(box.children.length>40) box.removeChild(box.firstChild);
+    box.scrollTop = box.scrollHeight;
+}
+function apiUrl(p){ return `http://${ip}${p}`; }
+
+async function api(path, method, body){
+    if(!ip){ throw new Error('未设置设备IP'); }
+    const opt = { method: method||'GET', headers:{'Accept':'application/json'}, signal: AbortSignal.timeout(8000) };
+    if(body){ opt.headers['Content-Type']='application/json'; opt.body=JSON.stringify(body); }
+    const res = await fetch(apiUrl(path), opt);
+    const ct = res.headers.get('content-type')||'';
+    return ct.includes('json') ? res.json() : res.text();
+}
+
+function buildModes(){
+    const c = el('modes'); c.innerHTML='';
+    MODES.forEach(m=>{
+        const d = document.createElement('div');
+        d.className='mode'; d.dataset.mode=m.n;
+        d.innerHTML = `<span class="idx">${m.n}</span><span class="ic">${m.ic}</span>${m.name}`;
+        d.onclick = ()=> setMode(m.n);
+        c.appendChild(d);
+    });
+}
+function markActive(){
+    document.querySelectorAll('.mode').forEach(b=> b.classList.toggle('active', Number(b.dataset.mode)===currentMode));
+}
+async function setMode(n){
+    try{ const r = await api(`/api/mode?mode=${n}`,'POST'); if(r&&r.success!==false){ currentMode=n; markActive(); log(`切换到模式 ${n}`,'info'); } else { log('模式切换失败: '+(r&&r.error),'err'); } }
+    catch(e){ log('模式切换失败: '+e.message,'err'); }
+}
+async function cmd(name){
+    try{ await api(`/api/command?cmd=${name}`,'POST'); log('命令已发送: '+name,'info'); }
+    catch(e){ log('命令失败: '+e.message,'err'); }
+}
+
+async function refresh(){
+    if(!ip){ return; }
+    try{
+        const s = await api('/api/status');
+        el('conn-dot').className = 'dot ' + (s.is_ap_mode?'ap':(s.wifi_connected?'on':''));
+        el('conn-text').textContent = s.is_ap_mode?'AP配网模式':(s.wifi_connected?'已连接':'离线');
+        currentMode = s.mode; markActive();
+        el('m-mode').textContent = (MODES.find(m=>m.n===s.mode)||{}).name || s.mode;
+        el('m-ver').textContent = s.fw_version||'--';
+        el('m-wifi').textContent = s.wifi_connected?'已连接':'未连接';
+        el('m-ip').textContent = s.ip_address||ip;
+        el('m-heap').textContent = s.free_heap? Math.round(s.free_heap/1024)+'K':'--';
+        const now = performance.now();
+        if(s.frame_count!==undefined){
+            const dt = (now-fpsPrev.t)/1000;
+            if(fpsPrev.t && dt>0.5){ const fps=(s.frame_count-fpsPrev.c)/dt; el('m-fps').textContent=fps.toFixed(0); fpsPrev={c:s.frame_count,t:now}; }
+            else if(!fpsPrev.t){ fpsPrev={c:s.frame_count,t:now}; }
         }
-        
-        // 绑定事件
-        function bindEvents() {
-            // 模式按钮点击事件
-            document.querySelectorAll('.mode-button').forEach(button => {
-                button.addEventListener('click', function() {
-                    const mode = parseInt(this.getAttribute('data-mode'));
-                    setMode(mode);
-                });
-            });
-            
-            // 控制按钮事件
-            document.getElementById('refresh-btn').addEventListener('click', updateStatus);
-            document.getElementById('rainbow-btn').addEventListener('click', testRainbow);
-            document.getElementById('off-btn').addEventListener('click', turnOff);
-            document.getElementById('ping-btn').addEventListener('click', pingDevice);
-            document.getElementById('config-btn').addEventListener('click', openIPConfig);
-            document.getElementById('ap-provision-btn').addEventListener('click', openApProvision);
-            document.getElementById('ip-edit-icon').addEventListener('click', openIPConfig);
-            
-            // 响应框点击事件（清空）
-            document.getElementById('response-box').addEventListener('click', function() {
-                this.innerHTML = '<div>已清空消息...</div>';
-            });
-            
-            // IP配置模态框事件
-            document.getElementById('modal-close-btn').addEventListener('click', closeIPConfig);
-            document.getElementById('modal-cancel-btn').addEventListener('click', closeIPConfig);
-            document.getElementById('modal-save-btn').addEventListener('click', saveIPConfig);
-            
-            // AP配网模态框事件
-            document.getElementById('ap-cancel-btn').addEventListener('click', closeApProvision);
-            document.getElementById('ap-submit-btn').addEventListener('click', submitApConfig);
-            
-            // 快速IP按钮事件
-            document.querySelectorAll('.quick-ip-btn').forEach(button => {
-                button.addEventListener('click', function() {
-                    const ip = this.getAttribute('data-ip');
-                    document.getElementById('ip-input').value = ip;
-                });
-            });
-            
-            // 点击模态框背景关闭
-            document.getElementById('ip-modal').addEventListener('click', function(e) {
-                if (e.target === this) {
-                    closeIPConfig();
-                }
-            });
-            
-            document.getElementById('ap-overlay').addEventListener('click', function(e) {
-                if (e.target === this) {
-                    closeApProvision();
-                }
-            });
-            
-            // 按ESC键关闭模态框
-            document.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape') {
-                    closeIPConfig();
-                    closeApProvision();
-                }
-            });
-            
-            // IP输入框按Enter保存
-            document.getElementById('ip-input').addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') {
-                    saveIPConfig();
-                }
-            });
-            
-            // AP配网表单回车提交
-            document.getElementById('ap-ssid').addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') {
-                    submitApConfig();
-                }
-            });
-            
-            document.getElementById('ap-password').addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') {
-                    submitApConfig();
-                }
-            });
+        const e = Math.max(0, Math.min(100, (s.energy||0)));
+        el('energy-bar').style.width = Math.min(100,(e/1.2))+'%';
+        el('m-energy').textContent = (s.energy||0).toFixed(0);
+        el('bpm-badge').textContent = 'BPM '+(s.bpm||'--');
+        el('pulse-lamp').style.transform = 'scale('+(1+(s.pulse||0)/60)+')';
+        el('pulse-lamp').style.boxShadow = '0 0 '+(6+s.pulse/6)+'px rgba(176,107,255,'+(0.2+s.pulse/140)+')';
+        if(!scrubBright && s.brightness!==undefined){ el('s-bright').value=s.brightness; el('v-bright').textContent=s.brightness+'%'; el('m-bright').textContent=s.brightness+'%'; }
+        if(!scrubPost){
+            if(s.gamma!==undefined){ el('s-gamma').value=s.gamma; el('v-gamma').textContent=Number(s.gamma).toFixed(2); }
+            if(s.gate!==undefined){ el('s-gate').value=s.gate; el('v-gate').textContent=s.gate; }
+            if(s.afterimage!==undefined){ el('s-after').value=s.afterimage; el('v-after').textContent=Number(s.afterimage).toFixed(2); }
         }
-        
-        // 从本地存储加载上次使用的IP
-        function loadLastIP() {
-            const lastIP = localStorage.getItem('led_controller_ip');
-            if (lastIP) {
-                document.getElementById('device-ip').textContent = lastIP;
-                currentDeviceIP = lastIP;
-            }
-        }
-        
-        // 保存IP到本地存储
-        function saveIP(ip) {
-            localStorage.setItem('led_controller_ip', ip);
-        }
-        
-        // 获取设备IP（如果未设置，提示用户输入）
-        function getDeviceIP() {
-            let ip = currentDeviceIP || document.getElementById('device-ip').textContent;
-            
-            if (!ip || ip === '-' || ip === '未连接') {
-                // 如果未设置IP，打开配置模态框
-                showMessage('❌ 请先配置设备IP地址', 'error');
-                openIPConfig();
-                return null;
-            }
-            
-            return ip;
-        }
-        
-        // 发送API请求
-        async function sendRequest(endpoint, method = 'GET', body = null) {
-            const ip = getDeviceIP();
-            if (!ip) return null;
-            
-            const url = `http://${ip}${endpoint}`;
-            
-            try {
-                const options = {
-                    method: method,
-                    headers: {
-                        'Accept': 'application/json',
-                    },
-                    signal: AbortSignal.timeout(5000) // 5秒超时
-                };
-                
-                if (body && (method === 'POST' || method === 'PUT')) {
-                    options.headers['Content-Type'] = 'application/json';
-                    options.body = JSON.stringify(body);
-                }
-                
-                const response = await fetch(url, options);
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP错误: ${response.status}`);
-                }
-                
-                // 检查响应内容类型
-                const contentType = response.headers.get('content-type');
-                if (contentType && contentType.includes('application/json')) {
-                    return await response.json();
-                } else {
-                    return await response.text();
-                }
-            } catch (error) {
-                console.error('请求失败:', error);
-                
-                let errorMessage = `❌ 连接失败: ${error.message}`;
-                if (error.name === 'AbortError') {
-                    errorMessage = '❌ 连接超时，请检查IP地址是否正确';
-                } else if (error.message.includes('Failed to fetch')) {
-                    errorMessage = '❌ 无法连接到设备，请检查IP地址和网络连接';
-                }
-                
-                showMessage(errorMessage, 'error');
-                return null;
-            }
-        }
-        
-        // 检查AP模式
-        async function checkApMode() {
-            try {
-                // 尝试连接AP模式默认IP
-                const response = await fetch(`http://${apDeviceIP}/api/status`, {
-                    signal: AbortSignal.timeout(3000)
-                });
-                
-                if (response.ok) {
-                    const result = await response.json();
-                    if (result.is_ap_mode) {
-                        isApMode = true;
-                        showMessage(`📶 检测到设备处于AP配网模式，IP: ${apDeviceIP}`, 'info');
-                        updateApDeviceInfo(result);
-                        return true;
-                    }
-                }
-            } catch (error) {
-                // 正常情况，设备不在AP模式
-                console.log('设备不在AP模式或无法连接:', error.message);
-            }
-            return false;
-        }
-        
-        // 更新AP设备信息
-        function updateApDeviceInfo(deviceInfo) {
-            if (deviceInfo.device_name) {
-                document.getElementById('hotspot-ssid').textContent = deviceInfo.device_name;
-            }
-        }
-        
-        // 设置LED模式
-        async function setMode(mode) {
-            showMessage(`🔄 正在切换到模式 ${mode}...`, 'info');
-            
-            const result = await sendRequest(`/api/mode?mode=${mode}`, 'POST');
-            
-            if (result) {
-                if (result.success === true || result.success === false) {
-                    if (result.success) {
-                        currentMode = mode;
-                        updateActiveButton();
-                        document.getElementById('current-mode').textContent = getModeName(mode);
-                        showMessage(`✅ 已切换到: ${getModeName(mode)}`, 'success');
-                    } else {
-                        showMessage(`❌ 模式切换失败: ${result.error || '未知错误'}`, 'error');
-                    }
-                } else {
-                    // 兼容旧版API
-                    currentMode = mode;
-                    updateActiveButton();
-                    document.getElementById('current-mode').textContent = getModeName(mode);
-                    showMessage(`✅ 模式切换命令已发送`, 'success');
-                }
-            }
-        }
-        
-        // 更新激活按钮状态
-        function updateActiveButton() {
-            // 移除所有按钮的激活状态
-            document.querySelectorAll('.mode-button').forEach(button => {
-                button.classList.remove('active');
-            });
-            
-            // 激活当前模式按钮
-            if (currentMode >= 0) {
-                const activeButton = document.querySelector(`.mode-button[data-mode="${currentMode}"]`);
-                if (activeButton) {
-                    activeButton.classList.add('active');
-                }
-            }
-        }
-        
-        // 获取模式名称
-        function getModeName(mode) {
-            const modeNames = {
-                0: '频谱显示',
-                1: '彩虹效果',
-                2: '调试模式',
-                3: '流星脉冲',
-                4: '水波纹效果',
-                5: '能量波效果',
-                6: '烟花效果',
-                7: '节奏脉冲',
-                8: '节奏闪烁',
-                9: '节奏跳动',
-                10: '闪烁彩虹流水',
-                11: '爆炸碰撞',
-                12: '关闭'
-            };
-            
-            return modeNames[mode] || `模式 ${mode}`;
-        }
-        
-        // 测试彩虹效果
-        async function testRainbow() {
-            showMessage('🌈 正在测试彩虹效果...', 'info');
-            
-            const result = await sendRequest('/api/command?cmd=test_rainbow', 'POST');
-            
-            if (result) {
-                if (result.success) {
-                    showMessage('✅ 彩虹效果测试已启动', 'success');
-                } else {
-                    showMessage(`❌ 测试失败: ${result.error || '未知错误'}`, 'error');
-                }
-            }
-        }
-        
-        // 关闭所有LED
-        async function turnOff() {
-            showMessage('⚫ 正在关闭所有LED...', 'info');
-            
-            const result = await sendRequest('/api/mode?mode=12', 'POST');
-            
-            if (result) {
-                if (result.success === true || result.success === false) {
-                    if (result.success) {
-                        currentMode = 12;
-                        updateActiveButton();
-                        document.getElementById('current-mode').textContent = '关闭';
-                        showMessage('✅ LED已关闭', 'success');
-                    } else {
-                        showMessage(`❌ 关闭失败: ${result.error || '未知错误'}`, 'error');
-                    }
-                } else {
-                    currentMode = 12;
-                    updateActiveButton();
-                    document.getElementById('current-mode').textContent = '关闭';
-                    showMessage('✅ 关闭命令已发送', 'success');
-                }
-            }
-        }
-        
-        // 连接测试
-        async function pingDevice() {
-            const ip = getDeviceIP();
-            if (!ip) return;
-            
-            showMessage(`📡 正在连接测试 ${ip}...`, 'info');
-            
-            const startTime = Date.now();
-            const result = await sendRequest('/ping');
-            const endTime = Date.now();
-            const pingTime = endTime - startTime;
-            
-            if (result === 'pong' || result === 'pong\n') {
-                showMessage(`✅ 连接成功! 延迟: ${pingTime}ms`, 'success');
-                updateStatus(); // 顺便更新状态
-            } else if (result) {
-                // 有些设备可能返回JSON格式
-                showMessage(`✅ 连接成功! 延迟: ${pingTime}ms`, 'success');
-                updateStatus();
-            } else {
-                showMessage('❌ 连接失败，设备无响应', 'error');
-            }
-        }
-        
-        // 更新设备状态
-        async function updateStatus() {
-            const result = await sendRequest('/api/status');
-            
-            if (result) {
-                // 更新当前模式
-                if (result.mode !== undefined) {
-                    currentMode = result.mode;
-                    document.getElementById('current-mode').textContent = getModeName(currentMode);
-                    updateActiveButton();
-                }
-                
-                // 更新WiFi状态
-                if (result.wifi_connected !== undefined) {
-                    const wifiStatus = document.getElementById('wifi-status');
-                    if (result.is_ap_mode) {
-                        wifiStatus.textContent = 'AP配网模式';
-                        wifiStatus.style.color = '#ffb142';
-                        isApMode = true;
-                    } else {
-                        wifiStatus.textContent = result.wifi_connected ? '已连接' : '未连接';
-                        wifiStatus.style.color = result.wifi_connected ? '#4d96ff' : '#ff6b6b';
-                        isApMode = false;
-                    }
-                }
-                
-                // 更新IP地址
-                if (result.ip_address) {
-                    document.getElementById('device-ip').textContent = result.ip_address;
-                    currentDeviceIP = result.ip_address;
-                    saveIP(result.ip_address);
-                }
-                
-                // 更新帧率
-                if (result.frame_count !== undefined) {
-                    document.getElementById('frame-rate').textContent = result.frame_count;
-                }
-            }
-        }
-        
-        // 打开IP配置模态框
-        function openIPConfig() {
-            const modal = document.getElementById('ip-modal');
-            const ipInput = document.getElementById('ip-input');
-            
-            // 设置当前IP为默认值
-            ipInput.value = currentDeviceIP || '';
-            ipInput.focus();
-            ipInput.select();
-            
-            modal.classList.add('active');
-        }
-        
-        // 关闭IP配置模态框
-        function closeIPConfig() {
-            document.getElementById('ip-modal').classList.remove('active');
-        }
-        
-        // 打开AP配网模态框
-        async function openApProvision() {
-            const overlay = document.getElementById('ap-overlay');
-            
-            // 先尝试获取AP模式设备信息
-            showMessage('🔍 正在检测设备热点...', 'info');
-            
-            const isApMode = await checkApMode();
-            if (isApMode) {
-                showMessage('✅ 已连接到设备热点，请配置WiFi', 'success');
-            } else {
-                showMessage(`📶 请先连接到设备热点 (IP: ${apDeviceIP})`, 'info');
-            }
-            
-            overlay.classList.add('active');
-            
-            // 自动填充上次使用的WiFi名称
-            const lastWifi = localStorage.getItem('last_wifi_ssid');
-            if (lastWifi) {
-                document.getElementById('ap-ssid').value = lastWifi;
-                document.getElementById('ap-password').focus();
-            } else {
-                document.getElementById('ap-ssid').focus();
-            }
-        }
-        
-        // 关闭AP配网模态框
-        function closeApProvision() {
-            document.getElementById('ap-overlay').classList.remove('active');
-            document.getElementById('ap-result').style.display = 'none';
-        }
-        
-        // 保存IP配置
-        async function saveIPConfig() {
-            const ipInput = document.getElementById('ip-input');
-            let newIP = ipInput.value.trim();
-            
-            // 验证IP地址格式
-            if (!newIP) {
-                showMessage('❌ IP地址不能为空', 'error');
-                ipInput.focus();
-                return;
-            }
-            
-            // 简单IP格式验证
-            const ipRegex = /^([0-9]{1,3}\.){3}[0-9]{1,3}$/;
-            if (!ipRegex.test(newIP)) {
-                showMessage('❌ IP地址格式不正确，请使用类似 192.168.1.100 的格式', 'error');
-                ipInput.focus();
-                return;
-            }
-            
-            // 检查IP各部分是否在0-255范围内
-            const parts = newIP.split('.');
-            for (let part of parts) {
-                const num = parseInt(part);
-                if (num < 0 || num > 255) {
-                    showMessage('❌ IP地址各部分必须在0-255之间', 'error');
-                    ipInput.focus();
-                    return;
-                }
-            }
-            
-            // 保存新IP
-            saveIP(newIP);
-            currentDeviceIP = newIP;
-            document.getElementById('device-ip').textContent = newIP;
-            
-            showMessage(`✅ IP地址已更新为: ${newIP}`, 'success');
-            
-            // 关闭模态框
-            closeIPConfig();
-            
-            // 立即测试新IP连接
-            showMessage('🔄 正在测试新IP连接...', 'info');
-            
-            const startTime = Date.now();
-            try {
-                const response = await fetch(`http://${newIP}/ping`, { 
-                    signal: AbortSignal.timeout(3000) 
-                });
-                const endTime = Date.now();
-                const pingTime = endTime - startTime;
-                
-                if (response.ok) {
-                    const result = await response.text();
-                    if (result.includes('pong')) {
-                        showMessage(`✅ 新IP连接成功! 延迟: ${pingTime}ms`, 'success');
-                        // 连接成功后更新状态
-                        updateStatus();
-                    } else {
-                        showMessage('⚠️ 设备响应异常，但连接已建立', 'info');
-                    }
-                } else {
-                    showMessage('⚠️ 设备响应异常，但IP已保存', 'info');
-                }
-            } catch (error) {
-                showMessage('❌ 无法连接到新IP地址，请检查网络连接', 'error');
-            }
-        }
-        
-        // 提交AP配网配置
-        async function submitApConfig() {
-            const ssidInput = document.getElementById('ap-ssid');
-            const passwordInput = document.getElementById('ap-password');
-            const submitBtn = document.getElementById('ap-submit-btn');
-            const resultDiv = document.getElementById('ap-result');
-            
-            const ssid = ssidInput.value.trim();
-            const password = passwordInput.value;
-            
-            if (!ssid) {
-                resultDiv.textContent = '❌ 请输入WiFi名称 (SSID)';
-                resultDiv.className = 'result-message error';
-                resultDiv.style.display = 'block';
-                ssidInput.focus();
-                return;
-            }
-            
-            // 保存WiFi名称到本地存储
-            localStorage.setItem('last_wifi_ssid', ssid);
-            
-            // 禁用提交按钮，显示加载状态
-            submitBtn.disabled = true;
-            submitBtn.textContent = '配置中...';
-            
-            resultDiv.innerHTML = '🔄 正在提交WiFi配置...';
-            resultDiv.className = 'result-message';
-            resultDiv.style.display = 'block';
-            
-            try {
-                const response = await fetch(`http://${apDeviceIP}/api/provision`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        ssid: ssid,
-                        password: password || ""
-                    }),
-                    signal: AbortSignal.timeout(10000)
-                });
-                
-                const result = await response.json();
-                
-                if (result.success) {
-                    resultDiv.innerHTML = `
-                        ✅ ${result.message}
-                        <br><br>
-                        📡 设备正在重启并连接WiFi...
-                        <br><br>
-                        <strong>下一步操作：</strong>
-                        <ol style="margin: 10px 0; padding-left: 20px;">
-                            <li>等待30秒让设备重启</li>
-                            <li>重新连接到您的家庭WiFi：<strong>${ssid}</strong></li>
-                            <li>返回控制页面，设备将自动检测新IP</li>
-                            <li>或在路由器管理界面查看设备IP</li>
-                        </ol>
-                    `;
-                    resultDiv.className = 'result-message success';
-                    
-                    // 5秒后关闭模态框
-                    setTimeout(() => {
-                        closeApProvision();
-                        showMessage('✅ WiFi配置已提交，设备正在重启...', 'success');
-                        
-                        // 10秒后尝试重新连接
-                        setTimeout(() => {
-                            showMessage('🔄 尝试重新连接设备...', 'info');
-                            updateStatus();
-                        }, 10000);
-                    }, 5000);
-                    
-                } else {
-                    resultDiv.innerHTML = `❌ 配置失败: ${result.error || '未知错误'}`;
-                    resultDiv.className = 'result-message error';
-                    submitBtn.disabled = false;
-                    submitBtn.textContent = '🚀 提交配置';
-                }
-            } catch (error) {
-                resultDiv.innerHTML = `❌ 网络错误: ${error.message}<br><br>请确保：<br>1. 已连接到设备热点<br>2. 设备IP地址为: ${apDeviceIP}`;
-                resultDiv.className = 'result-message error';
-                submitBtn.disabled = false;
-                submitBtn.textContent = '🚀 提交配置';
-            }
-        }
-        
-        // 显示消息到响应框
-        function showMessage(message, type = 'info') {
-            const responseBox = document.getElementById('response-box');
-            const timestamp = new Date().toLocaleTimeString();
-            
-            let color = '#a0c1ff'; // 默认颜色
-            if (type === 'success') color = '#6bff8d';
-            if (type === 'error') color = '#ff6b6b';
-            if (type === 'info') color = '#a0c1ff';
-            
-            const messageElement = document.createElement('div');
-            messageElement.innerHTML = `<span style="color: ${color}">[${timestamp}] ${message}</span>`;
-            
-            responseBox.appendChild(messageElement);
-            responseBox.scrollTop = responseBox.scrollHeight;
-            
-            // 限制消息数量
-            const maxMessages = 20;
-            while (responseBox.children.length > maxMessages) {
-                responseBox.removeChild(responseBox.firstChild);
-            }
-        }
-        
-        // 页面加载完成后初始化
-        document.addEventListener('DOMContentLoaded', init);
-    </script>
+    }catch(e){
+        el('conn-dot').className='dot'; el('conn-text').textContent='连接失败';
+    }
+}
+
+let postTimer=null;
+function queuePost(){
+    if(busyPost) return;
+    const gamma=parseFloat(el('s-gamma').value), gate=parseInt(el('s-gate').value), after=parseFloat(el('s-after').value);
+    el('v-gamma').textContent=gamma.toFixed(2); el('v-gate').textContent=gate; el('v-after').textContent=after.toFixed(2);
+    scrubPost=true;
+    clearTimeout(postTimer);
+    postTimer=setTimeout(async()=>{
+        try{ await api(`/api/post?gamma=${gamma}&gate=${gate}&afterimage=${after}`,'POST'); }
+        catch(e){ log('后处理下发失败: '+e.message,'err'); }
+        setTimeout(()=>scrubPost=false, 1200);
+    }, 350);
+}
+function resetPost(){ el('s-gamma').value=1.18; el('s-gate').value=8; el('s-after').value=0.62; queuePost(); }
+
+let brightTimer=null;
+function onBright(){
+    const v=parseInt(el('s-bright').value);
+    el('v-bright').textContent=v+'%'; el('m-bright').textContent=v+'%';
+    scrubBright=true;
+    clearTimeout(brightTimer);
+    brightTimer=setTimeout(async()=>{ try{ await api(`/api/brightness?value=${v}`,'POST'); }catch(e){ log('亮度下发失败: '+e.message,'err'); } setTimeout(()=>scrubBright=false,1000); },250);
+}
+
+function pickFile(){ el('ota-file').click(); }
+document.addEventListener('DOMContentLoaded', ()=>{
+    el('ota-file').addEventListener('change', e=>{
+        otaFile = e.target.files[0]||null;
+        el('ota-name').textContent = otaFile? `${otaFile.name} (${Math.round(otaFile.size/1024)}KB)` : '未选择 (.bin)';
+        el('ota-btn').disabled = !otaFile;
+    });
+    ['s-gamma','s-gate','s-after'].forEach(id=> el(id).addEventListener('input', queuePost));
+    el('s-bright').addEventListener('input', onBright);
+    el('s-bright').addEventListener('pointerdown', ()=>scrubBright=true);
+    el('s-bright').addEventListener('pointerup', ()=> setTimeout(()=>scrubBright=false,1000));
+
+    buildModes();
+    if(ip){ el('ip-label').textContent = ip; startPoll(); } else { openIp(); }
+    log('页面已加载，请设置设备 IP 后连接。','info');
+});
+
+function startPoll(){ clearInterval(timer); refresh(); timer=setInterval(refresh, 2500); }
+
+async function startOta(){
+    if(!otaFile || !ip){ return; }
+    const btn=el('ota-btn'); btn.disabled=true;
+    el('ota-prog').style.display='block'; el('ota-bar').style.width='0%';
+    el('ota-status').textContent='正在上传固件…';
+    const xhr=new XMLHttpRequest();
+    xhr.open('POST', apiUrl('/api/ota'));
+    xhr.setRequestHeader('Content-Type','application/octet-stream');
+    let sent=false;
+    xhr.upload.onprogress=ev=>{ if(ev.lengthComputable) el('ota-bar').style.width=Math.round(ev.loaded/ev.total*100)+'%'; };
+    xhr.upload.onload=()=>{ sent=true; };
+    xhr.onload=()=>{ el('ota-bar').style.width='100%'; el('ota-status').textContent='上传完成，设备重启中…'; waitBack(); };
+    xhr.onerror=()=>{ if(sent){ el('ota-bar').style.width='100%'; el('ota-status').textContent='上传完成，设备重启中…'; waitBack(); } else { el('ota-status').textContent='上传失败，请检查连接'; btn.disabled=false; } };
+    xhr.send(otaFile);
+    otaFile=null;
+}
+async function waitBack(){
+    clearInterval(timer);
+    for(let i=0;i<25;i++){
+        await new Promise(r=>setTimeout(r,3000));
+        try{ const t=await fetch(apiUrl('/ping'),{signal:AbortSignal.timeout(2000)}); if(t.ok){ el('ota-status').textContent='✅ 升级完成，设备已重启'; log('OTA 升级完成','ok'); el('ota-btn').disabled=true; startPoll(); return; } }catch(e){}
+    }
+    el('ota-status').textContent='⚠️ 未能重新连接，请检查设备';
+    el('ota-btn').disabled=false;
+}
+
+function openIp(){ el('ip-modal').style.display='flex'; el('ip-input').value=ip; }
+function closeIp(){ el('ip-modal').style.display='none'; }
+function setIpVal(v){ el('ip-input').value=v; }
+function saveIp(){
+    const v=el('ip-input').value.trim();
+    if(!/^\d{1,3}(\.\d{1,3}){3}$/.test(v)){ log('IP 格式不正确','err'); return; }
+    ip=v; localStorage.setItem('dev_ip',ip); el('ip-label').textContent=ip; closeIp();
+    log('已连接到 '+ip,'info'); startPoll();
+}
+
+function openProvision(){ el('pv-modal').style.display='flex'; }
+function closeProvision(){ el('pv-modal').style.display='none'; }
+async function doProvision(){
+    const ssid=el('pv-ssid').value.trim(), pass=el('pv-pass').value;
+    if(!ssid){ el('pv-tip').textContent='请输入 SSID'; return; }
+    try{
+        const r=await api('/api/provision','POST',{ssid,password:pass});
+        if(r&&r.success){ log('配网已提交，设备将重启连接 '+ssid,'ok'); closeProvision(); }
+        else { el('pv-tip').textContent='失败: '+((r&&r.error)||'未知'); }
+    }catch(e){ el('pv-tip').textContent='失败: '+e.message; }
+}
+</script>
 </body>
 </html>
