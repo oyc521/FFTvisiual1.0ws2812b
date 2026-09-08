@@ -36,6 +36,45 @@ static inline rgb_color_t scale_color(rgb_color_t c)
     return c;
 }
 
+// ===================== 统一效果参数（全局风格） =====================
+static led_beat_t s_beat;
+static led_fx_t g_fx = {
+    .speed = 1.0f,
+    .intensity = 1.0f,
+    .sensitivity = 1.0f,
+    .hue = 0.0f,
+    .color_speed = 1.0f,
+    .beat_react = 0.6f,
+};
+
+static float fx_clampf(float v, float lo, float hi)
+{
+    if (v < lo) return lo;
+    if (v > hi) return hi;
+    return v;
+}
+
+esp_err_t led_set_fx(const led_fx_t *fx)
+{
+    if (!fx) return ESP_ERR_INVALID_ARG;
+    g_fx.speed       = fx_clampf(fx->speed, 0.2f, 3.0f);
+    g_fx.intensity   = fx_clampf(fx->intensity, 0.2f, 2.0f);
+    g_fx.sensitivity = fx_clampf(fx->sensitivity, 0.2f, 4.0f);
+    float h = fx->hue;
+    h -= floorf(h);
+    g_fx.hue = h;
+    g_fx.color_speed = fx_clampf(fx->color_speed, 0.0f, 4.0f);
+    g_fx.beat_react  = fx_clampf(fx->beat_react, 0.0f, 1.0f);
+    return ESP_OK;
+}
+
+const led_fx_t *led_get_fx(void) { return &g_fx; }
+
+static inline float fx_sens(float x)   { return x * g_fx.sensitivity; }
+static inline float fx_inten(float v)  { return v * g_fx.intensity; }
+static inline float fx_hue(float h)    { h += g_fx.hue; h -= floorf(h); return h; }
+static inline float fx_beat(void)      { return s_beat.pulse * g_fx.beat_react; }
+
 // ===================== 全局后处理管线 =====================
 static float    g_post_gamma     = 1.18f;
 static uint8_t  g_post_gate      = 8;
@@ -68,9 +107,9 @@ static esp_err_t led_out_pixel(int idx, rgb_color_t c)
     }
 
     const float inv255 = 1.0f / 255.0f;
-    float rr = powf(dr * inv255, g_post_gamma) * 255.0f * s_global_brightness;
-    float rg = powf(dg * inv255, g_post_gamma) * 255.0f * s_global_brightness;
-    float rb = powf(db * inv255, g_post_gamma) * 255.0f * s_global_brightness;
+    float rr = powf(fx_inten(dr * inv255), g_post_gamma) * 255.0f * s_global_brightness;
+    float rg = powf(fx_inten(dg * inv255), g_post_gamma) * 255.0f * s_global_brightness;
+    float rb = powf(fx_inten(db * inv255), g_post_gamma) * 255.0f * s_global_brightness;
     if (rr > 255.0f) rr = 255.0f;
     if (rg > 255.0f) rg = 255.0f;
     if (rb > 255.0f) rb = 255.0f;
@@ -97,7 +136,6 @@ void led_get_post_params(float *gamma, uint8_t *gate, float *afterimage)
 }
 
 // ===================== 统一节拍引擎 =====================
-static led_beat_t s_beat;
 static float s_prev_bands[NUM_FREQ_BANDS];
 static float s_bass_hist = 0.0f;
 static float s_flux_hist = 0.0f;
@@ -174,6 +212,34 @@ static void led_beat_update(const float *bands, int n)
         s_beat.pulse *= 0.86f;
         if (s_beat.pulse < 0.02f) s_beat.pulse = 0.0f;
     }
+}
+
+// 显示用 32 段归一化频谱（供网页实时频谱显示）
+static uint8_t s_disp_bands[NUM_FREQ_BANDS];
+static float s_disp_gain = 1.0f;
+
+static void led_update_display_spectrum(const float *bands, int n)
+{
+    if (!bands || n <= 0) return;
+    if (n > NUM_FREQ_BANDS) n = NUM_FREQ_BANDS;
+    float mx = 1.0f;
+    for (int i = 0; i < n; i++) if (bands[i] > mx) mx = bands[i];
+    s_disp_gain = s_disp_gain * 0.95f;
+    if (mx > s_disp_gain) s_disp_gain = mx;
+    if (s_disp_gain < 1.0f) s_disp_gain = 1.0f;
+    for (int i = 0; i < n; i++) {
+        float v = bands[i] / s_disp_gain;
+        if (v > 1.0f) v = 1.0f;
+        if (v < 0.0f) v = 0.0f;
+        s_disp_bands[i] = (uint8_t)(v * 255.0f);
+    }
+}
+
+void led_get_spectrum(uint8_t *out, int n)
+{
+    if (!out) return;
+    if (n > NUM_FREQ_BANDS) n = NUM_FREQ_BANDS;
+    for (int i = 0; i < n; i++) out[i] = s_disp_bands[i];
 }
 
 // 流星脉冲效果专用变量
@@ -346,8 +412,8 @@ static struct {
 } rhythm_breath_state = {
     .breath_phase = 0,
     .breath_speed = 0.05f,
-    .breath_min = 0.1f,
-    .breath_max = 0.6f,
+    .breath_min = 0.03f,
+    .breath_max = 1.0f,
     .color_hue = 0,
     .hue_speed = 0.001f,
     .beat_threshold = 20.0f,
@@ -603,9 +669,9 @@ static void update_and_draw_pulses(void) {
         if (pulses[i].active) {
             // 更新位置
             if (pulses[i].direction == 0) { // 从左向右
-                pulses[i].position += pulses[i].speed;
+                pulses[i].position += pulses[i].speed * g_fx.speed;
             } else { // 从右向左
-                pulses[i].position -= pulses[i].speed;
+                pulses[i].position -= pulses[i].speed * g_fx.speed;
             }
             
             // 计算脉冲年龄（用于淡出效果）
@@ -886,7 +952,13 @@ esp_err_t led_show(void) {
 // HSV转RGB
 static rgb_color_t hsv_to_rgb(float h, float s, float v) {
     rgb_color_t color;
-    
+
+    h = fx_hue(h);
+    if (v > 1.0f) v = 1.0f;
+    if (v < 0.0f) v = 0.0f;
+    if (s > 1.0f) s = 1.0f;
+    if (s < 0.0f) s = 0.0f;
+
     int i = (int)(h * 6);
     float f = h * 6 - i;
     float p = v * (1 - s);
@@ -1011,418 +1083,77 @@ esp_err_t led_set_mode(led_mode_t mode) {
     return ESP_OK;
 }
 
-// 增强版水波纹效果 - 真正的动态水波纹，多颜色
+// 弹跳小球（原水波纹槽位）：3 颗球受重力弹跳，鼓点齐跳+错落，落地压扁
+#define BB_COUNT 3
+static struct { float y; float vy; uint32_t bounce; float hue; bool init; } s_ball[BB_COUNT];
+
 static esp_err_t water_ripple_effect(float *energy_bands, int num_bands) {
+    (void)energy_bands;
+    (void)num_bands;
     if (!strip) return ESP_ERR_INVALID_STATE;
-    
-    // 1. 清空颜色缓冲区
+
     clear_color_buffer();
-    
-    // 2. 计算音频能量分布（低、中、高频）
-    float total_energy = 0;
-    float low_energy = 0;    // 低频能量（0-33%）
-    float mid_energy = 0;    // 中频能量（33-66%）
-    float high_energy = 0;   // 高频能量（66-100%）
-    
-    for (int i = 0; i < num_bands; i++) {
-        float energy = energy_bands[i];
-        total_energy += energy;
-        
-        if (i < num_bands / 3) {
-            low_energy += energy;
-        } else if (i < num_bands * 2 / 3) {
-            mid_energy += energy;
-        } else {
-            high_energy += energy;
-        }
+
+    for (int k = 0; k < BB_COUNT; k++) {
+        if (!s_ball[k].init) { s_ball[k].y = 0.4f + 0.2f * k; s_ball[k].vy = 0.0f; s_ball[k].bounce = 0; s_ball[k].hue = (float)k / (float)BB_COUNT; s_ball[k].init = true; }
     }
-    
-    // 更新能量历史
-    water_ripple_state.energy_history[0] = low_energy;
-    water_ripple_state.energy_history[1] = mid_energy;
-    water_ripple_state.energy_history[2] = high_energy;
-    
-    // 3. 检测能量变化并触发水波纹
-    uint32_t current_time = animation_counter;
-    
-    // 低频能量触发大水波纹（慢速）- 暖色系
-    static float last_low_energy = 0;
-    if (low_energy > 20 && low_energy > last_low_energy * 1.3f) {
-        // 寻找空闲的水波纹
-        for (int i = 0; i < 10; i++) {
-            if (!water_ripple_state.ripples[i].active) {
-                water_ripple_state.ripples[i].active = true;
-                water_ripple_state.ripples[i].position = ((float)rand() / RAND_MAX) * led_count;
-                water_ripple_state.ripples[i].intensity = fminf(low_energy / 60.0f, 1.0f);
-                water_ripple_state.ripples[i].size = 0;
-                water_ripple_state.ripples[i].speed = 0.3f + (low_energy / 100.0f) * 0.3f;
-                water_ripple_state.ripples[i].start_time = current_time;
-                water_ripple_state.ripples[i].type = 0; // 低频大水波纹
-                
-                // 低频：暖色系（红色、橙色、黄色）
-                float hue;
-                int color_type = rand() % 3;
-                switch (color_type) {
-                    case 0: hue = 0.0f + ((float)rand() / RAND_MAX) * 0.05f;   // 红色系
-                            break;
-                    case 1: hue = 0.05f + ((float)rand() / RAND_MAX) * 0.05f;  // 橙红色系
-                            break;
-                    case 2: hue = 0.1f + ((float)rand() / RAND_MAX) * 0.05f;   // 橙色系
-                            break;
-                    default: hue = 0.0f;
-                }
-                water_ripple_state.ripples[i].color = hsv_to_rgb(hue, 0.9f, 1.0f);
-                break;
+
+    const led_beat_t *b = led_get_beat();
+    float sp = fmaxf(g_fx.speed, 0.2f);
+    float a_g = 0.0016f * sp * sp;
+    float mag = fminf((b->bass + b->mid + b->high) / 300.0f, 1.0f);
+    float kick = 0.030f + fx_beat() * 0.055f + mag * 0.03f;
+
+    for (int k = 0; k < BB_COUNT; k++) {
+        if (b->onset) {
+            float ph = 0.75f + 0.25f * (float)(((animation_counter / 3) + k) % 3) / 2.0f;
+            s_ball[k].vy += kick * ph;
+            s_ball[k].hue += 0.04f + 0.10f * fx_beat();
+            if (s_ball[k].hue > 1.0f) s_ball[k].hue -= 1.0f;
+        }
+        s_ball[k].vy -= a_g;
+        s_ball[k].y += s_ball[k].vy;
+        s_ball[k].hue += 0.0016f * g_fx.color_speed;
+        if (s_ball[k].hue > 1.0f) s_ball[k].hue -= 1.0f;
+        if (s_ball[k].y <= 0.0f) {
+            if (s_ball[k].vy < 0.0f) {
+                s_ball[k].bounce = animation_counter;
+                s_ball[k].vy = -s_ball[k].vy * 0.55f;
+                if (s_ball[k].vy < 0.004f) s_ball[k].vy = 0.004f;
             }
+            s_ball[k].y = 0.0f;
         }
+        if (s_ball[k].y > 1.0f) { s_ball[k].y = 1.0f; if (s_ball[k].vy > 0.0f) s_ball[k].vy = 0.0f; }
     }
-    last_low_energy = low_energy;
-    
-    // 中频能量触发中水波纹 - 绿色系
-    static float last_mid_energy = 0;
-    if (mid_energy > 25 && mid_energy > last_mid_energy * 1.4f && (rand() % 3 == 0)) {
-        for (int i = 0; i < 10; i++) {
-            if (!water_ripple_state.ripples[i].active) {
-                water_ripple_state.ripples[i].active = true;
-                water_ripple_state.ripples[i].position = ((float)rand() / RAND_MAX) * led_count;
-                water_ripple_state.ripples[i].intensity = fminf(mid_energy / 80.0f, 0.8f);
-                water_ripple_state.ripples[i].size = 0;
-                water_ripple_state.ripples[i].speed = 0.5f + (mid_energy / 100.0f) * 0.4f;
-                water_ripple_state.ripples[i].start_time = current_time;
-                water_ripple_state.ripples[i].type = 1; // 中频中水波纹
-                
-                // 中频：绿色系（绿色、黄绿色、青色）
-                float hue;
-                int color_type = rand() % 3;
-                switch (color_type) {
-                    case 0: hue = 0.25f + ((float)rand() / RAND_MAX) * 0.05f;  // 绿色系
-                            break;
-                    case 1: hue = 0.3f + ((float)rand() / RAND_MAX) * 0.05f;   // 黄绿色系
-                            break;
-                    case 2: hue = 0.35f + ((float)rand() / RAND_MAX) * 0.05f;  // 青绿色系
-                            break;
-                    default: hue = 0.3f;
-                }
-                water_ripple_state.ripples[i].color = hsv_to_rgb(hue, 0.9f, 1.0f);
-                break;
+
+    float lane = (float)led_count / (float)BB_COUNT;
+    for (int k = 0; k < BB_COUNT; k++) {
+        int lo = (int)floorf(k * lane);
+        int hi = (int)ceilf((k + 1) * lane) - 1;
+        if (hi >= led_count) hi = led_count - 1;
+        if (hi <= lo) { hi = lo + 1 > led_count - 1 ? lo : lo + 1; }
+
+        int age = (int)(animation_counter - s_ball[k].bounce);
+        if (age < 0) age = 0;
+        float squash = (age < 8) ? (1.0f - (float)age / 8.0f) : 0.0f;
+        float sigma = 1.1f + squash * 1.6f;
+        float amp = 0.85f + 0.15f * squash;
+        float span = (float)(hi - lo);
+        float cy = (float)lo + s_ball[k].y * span;
+        float hue = s_ball[k].hue;
+
+        for (int led = lo; led <= hi; led++) {
+            float dist = (float)led - cy;
+            float g = expf(-(dist * dist) / (2.0f * sigma * sigma));
+            float bright = g * amp;
+            if (bright > 0.02f) {
+                float led_hue = hue + dist * 0.02f;
+                rgb_color_t color = hsv_to_rgb(led_hue, 0.9f, bright > 1.0f ? 1.0f : bright);
+                set_buffer_pixel_blend(led, color, bright);
             }
         }
     }
-    last_mid_energy = mid_energy;
-    
-    // 高频能量触发小水波纹（快速）- 冷色系
-    static float last_high_energy = 0;
-    if (high_energy > 30 && high_energy > last_high_energy * 1.5f && (rand() % 2 == 0)) {
-        for (int i = 0; i < 10; i++) {
-            if (!water_ripple_state.ripples[i].active) {
-                water_ripple_state.ripples[i].active = true;
-                water_ripple_state.ripples[i].position = ((float)rand() / RAND_MAX) * led_count;
-                water_ripple_state.ripples[i].intensity = fminf(high_energy / 100.0f, 0.6f);
-                water_ripple_state.ripples[i].size = 0;
-                water_ripple_state.ripples[i].speed = 0.8f + (high_energy / 100.0f) * 0.6f;
-                water_ripple_state.ripples[i].start_time = current_time;
-                water_ripple_state.ripples[i].type = 2; // 高频小水波纹
-                
-                // 高频：冷色系（蓝色、紫色、粉色）
-                float hue;
-                int color_type = rand() % 3;
-                switch (color_type) {
-                    case 0: hue = 0.55f + ((float)rand() / RAND_MAX) * 0.05f;  // 蓝色系
-                            break;
-                    case 1: hue = 0.7f + ((float)rand() / RAND_MAX) * 0.1f;    // 紫色系
-                            break;
-                    case 2: hue = 0.85f + ((float)rand() / RAND_MAX) * 0.05f;  // 粉色系
-                            break;
-                    default: hue = 0.6f;
-                }
-                water_ripple_state.ripples[i].color = hsv_to_rgb(hue, 0.9f, 1.0f);
-                break;
-            }
-        }
-    }
-    last_high_energy = high_energy;
-    
-    // 4. 更新和绘制所有水波纹
-    for (int i = 0; i < 10; i++) {
-        if (water_ripple_state.ripples[i].active) {
-            // 更新水波纹大小
-            water_ripple_state.ripples[i].size += water_ripple_state.ripples[i].speed;
-            
-            // 计算年龄因子（淡出效果）
-            uint32_t age = current_time - water_ripple_state.ripples[i].start_time;
-            float age_factor = 1.0f - (float)age / 150.0f; // 150帧后完全消失
-            if (age_factor < 0) age_factor = 0;
-            
-            // 绘制水波纹
-            float intensity = water_ripple_state.ripples[i].intensity * age_factor;
-            float size = water_ripple_state.ripples[i].size;
-            float position = water_ripple_state.ripples[i].position;
-            rgb_color_t base_color = water_ripple_state.ripples[i].color;
-            
-            // 根据水波纹类型调整特性
-            float ring_count; // 波纹环数
-            float ring_spacing; // 环间距
-            float falloff_rate; // 衰减率
-            
-            switch (water_ripple_state.ripples[i].type) {
-                case 0: // 低频大水波纹（暖色）
-                    ring_count = 3;
-                    ring_spacing = 5.0f;
-                    falloff_rate = 0.7f;
-                    break;
-                case 1: // 中频中水波纹（绿色系）
-                    ring_count = 2;
-                    ring_spacing = 4.0f;
-                    falloff_rate = 0.6f;
-                    break;
-                case 2: // 高频小水波纹（冷色系）
-                    ring_count = 1;
-                    ring_spacing = 3.0f;
-                    falloff_rate = 0.5f;
-                    break;
-                default:
-                    ring_count = 2;
-                    ring_spacing = 4.0f;
-                    falloff_rate = 0.6f;
-            }
-            
-            // 绘制多个波纹环
-            for (int ring = 0; ring < ring_count; ring++) {
-                float ring_size = size - ring * ring_spacing;
-                if (ring_size < 0) continue;
-                
-                float ring_intensity = intensity * powf(falloff_rate, ring);
-                
-                // 绘制这个环
-                for (int led = 0; led < led_count; led++) {
-                    float distance = fabsf((float)led - position);
-                    float ring_width = 2.0f; // 环的宽度
-                    
-                    if (distance >= ring_size - ring_width && distance <= ring_size + ring_width) {
-                        // 计算环的强度（距离环中心越近强度越高）
-                        float ring_strength = 1.0f - fabsf(distance - ring_size) / ring_width;
-                        if (ring_strength < 0) ring_strength = 0;
-                        
-                        float final_intensity = ring_intensity * ring_strength;
-                        
-                        if (final_intensity > 0.01f) {
-                            // 根据环的年龄调整颜色（外环颜色变冷/变淡）
-                            float color_factor = 1.0f - (float)ring / ring_count;
-                            
-                            // 不同类型的波纹有不同的颜色变化
-                            rgb_color_t color;
-                            if (water_ripple_state.ripples[i].type == 0) {
-                                // 暖色波纹：外环变橙色/黄色
-                                float hue_shift = (float)ring * 0.02f;
-                                float hue = fmodf(0.0f + hue_shift, 1.0f); // 从红色逐渐变黄
-                                color = hsv_to_rgb(hue, 0.8f, final_intensity);
-                            } else if (water_ripple_state.ripples[i].type == 1) {
-                                // 绿色系波纹：外环变青蓝色
-                                float hue_shift = (float)ring * 0.03f;
-                                float hue = fmodf(0.3f + hue_shift, 1.0f); // 从绿色逐渐变蓝
-                                color = hsv_to_rgb(hue, 0.8f, final_intensity);
-                            } else {
-                                // 冷色波纹：外环变粉色/白色
-                                float hue_shift = (float)ring * 0.02f;
-                                float hue = fmodf(0.6f + hue_shift, 1.0f); // 从蓝色逐渐变紫
-                                color = hsv_to_rgb(hue, 0.8f, final_intensity);
-                            }
-                            
-                            set_buffer_pixel_blend(led, color, 1.0f);
-                        }
-                    }
-                }
-            }
-            
-            // 检查水波纹是否应该消失
-            if (age_factor <= 0 || water_ripple_state.ripples[i].size > led_count * 2) {
-                water_ripple_state.ripples[i].active = false;
-            }
-        }
-    }
-    
-    // 5. 添加彩虹色动态背景效果
-    water_ripple_state.background_phase += 0.05f; // 缓慢的相位变化
-    water_ripple_state.background_amplitude = fminf(total_energy / 300.0f, 0.4f);
-    
-    for (int i = 0; i < led_count; i++) {
-        // 添加彩虹色波浪背景
-        float wave1 = sinf(i * 0.1f + water_ripple_state.background_phase) * 0.1f;
-        float wave2 = sinf(i * 0.2f + water_ripple_state.background_phase * 1.5f) * 0.05f;
-        float wave3 = sinf(i * 0.05f + water_ripple_state.background_phase * 0.7f) * 0.15f;
-        
-        float background_intensity = water_ripple_state.background_amplitude * (0.1f + wave1 + wave2 + wave3);
-        
-        if (background_intensity > 0.01f) {
-            // 彩虹色背景：根据位置和时间变化
-            float pos_ratio = (float)i / led_count;
-            float time_shift = water_ripple_state.background_phase * 0.5f;
-            float hue = fmodf(pos_ratio * 0.7f + time_shift, 1.0f); // 彩虹色渐变
-            
-            // 根据能量分布调整颜色
-            if (low_energy > mid_energy && low_energy > high_energy) {
-                // 低频主导：偏红色/橙色
-                hue = fmodf(hue * 0.3f + 0.0f, 1.0f);
-            } else if (mid_energy > low_energy && mid_energy > high_energy) {
-                // 中频主导：偏绿色/青色
-                hue = fmodf(hue * 0.3f + 0.3f, 1.0f);
-            } else {
-                // 高频主导：偏蓝色/紫色
-                hue = fmodf(hue * 0.3f + 0.6f, 1.0f);
-            }
-            
-            rgb_color_t bg_color = hsv_to_rgb(hue, 0.7f, background_intensity);
-            set_buffer_pixel_blend(i, bg_color, 0.4f);
-        }
-    }
-    
-    // 6. 添加多彩反光效果（随高频能量变化）
-    if (high_energy > 15) {
-        int spark_count = (int)fminf(high_energy / 10.0f, 8.0f);
-        for (int s = 0; s < spark_count; s++) {
-            float spark_pos = ((float)rand() / RAND_MAX) * led_count;
-            int led_pos = (int)spark_pos;
-            
-            if (led_pos >= 0 && led_pos < led_count) {
-                // 随机颜色的反光点
-                float sparkle = sinf(current_time * 0.2f + s * 2.0f) * 0.5f + 0.5f;
-                float spark_intensity = fminf(high_energy / 80.0f, 0.6f) * sparkle;
-                
-                // 随机选择反光颜色
-                float spark_hue = ((float)rand() / RAND_MAX);
-                rgb_color_t spark_color;
-                
-                if (spark_hue < 0.2f) {
-                    // 金色/黄色反光
-                    spark_color = hsv_to_rgb(0.12f, 0.8f, spark_intensity);
-                } else if (spark_hue < 0.4f) {
-                    // 银色/白色反光
-                    spark_color.r = (uint8_t)(220 * spark_intensity);
-                    spark_color.g = (uint8_t)(230 * spark_intensity);
-                    spark_color.b = (uint8_t)(240 * spark_intensity);
-                } else if (spark_hue < 0.6f) {
-                    // 蓝色反光
-                    spark_color = hsv_to_rgb(0.6f, 0.7f, spark_intensity);
-                } else if (spark_hue < 0.8f) {
-                    // 紫色反光
-                    spark_color = hsv_to_rgb(0.8f, 0.7f, spark_intensity);
-                } else {
-                    // 粉色反光
-                    spark_color = hsv_to_rgb(0.9f, 0.6f, spark_intensity);
-                }
-                
-                set_buffer_pixel_blend(led_pos, spark_color, 0.8f);
-                
-                // 添加微弱的辉光
-                for (int offset = 1; offset <= 2; offset++) {
-                    if (led_pos - offset >= 0) {
-                        rgb_color_t glow_color = {
-                            .r = (uint8_t)(spark_color.r * 0.4f),
-                            .g = (uint8_t)(spark_color.g * 0.4f),
-                            .b = (uint8_t)(spark_color.b * 0.4f)
-                        };
-                        set_buffer_pixel_blend(led_pos - offset, glow_color, 0.3f);
-                    }
-                    if (led_pos + offset < led_count) {
-                        rgb_color_t glow_color = {
-                            .r = (uint8_t)(spark_color.r * 0.4f),
-                            .g = (uint8_t)(spark_color.g * 0.4f),
-                            .b = (uint8_t)(spark_color.b * 0.4f)
-                        };
-                        set_buffer_pixel_blend(led_pos + offset, glow_color, 0.3f);
-                    }
-                }
-            }
-        }
-    }
-    
-    // 7. 添加雨滴效果（随机产生小水花）
-    if (mid_energy > 20 && (rand() % 100 < 10)) { // 10%的概率每帧
-        for (int i = 0; i < 3; i++) {
-            if (rand() % 3 == 0) { // 三分之一概率产生小水花
-                float drop_pos = ((float)rand() / RAND_MAX) * led_count;
-                int led_pos = (int)drop_pos;
-                
-                if (led_pos >= 0 && led_pos < led_count) {
-                    // 随机颜色的雨滴
-                    float drop_hue = ((float)rand() / RAND_MAX);
-                    float drop_intensity = 0.2f + ((float)rand() / RAND_MAX) * 0.3f;
-                    
-                    rgb_color_t drop_color;
-                    if (drop_hue < 0.25f) {
-                        drop_color = hsv_to_rgb(0.0f, 0.9f, drop_intensity); // 红色
-                    } else if (drop_hue < 0.5f) {
-                        drop_color = hsv_to_rgb(0.3f, 0.9f, drop_intensity); // 绿色
-                    } else if (drop_hue < 0.75f) {
-                        drop_color = hsv_to_rgb(0.6f, 0.9f, drop_intensity); // 蓝色
-                    } else {
-                        drop_color = hsv_to_rgb(0.8f, 0.9f, drop_intensity); // 紫色
-                    }
-                    
-                    // 雨滴中心
-                    set_buffer_pixel_blend(led_pos, drop_color, 0.9f);
-                    
-                    // 雨滴扩散
-                    for (int d = 1; d <= 2; d++) {
-                        float spread_intensity = drop_intensity * (0.5f / d);
-                        rgb_color_t spread_color = {
-                            .r = (uint8_t)(drop_color.r * spread_intensity),
-                            .g = (uint8_t)(drop_color.g * spread_intensity),
-                            .b = (uint8_t)(drop_color.b * spread_intensity)
-                        };
-                        
-                        if (led_pos - d >= 0) {
-                            set_buffer_pixel_blend(led_pos - d, spread_color, 0.4f);
-                        }
-                        if (led_pos + d < led_count) {
-                            set_buffer_pixel_blend(led_pos + d, spread_color, 0.4f);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    // 8. 添加水面倒影效果（对称波纹）
-    if (total_energy > 50 && (rand() % 50 == 0)) {
-        // 选择一个随机位置创建对称波纹
-        float center_pos = ((float)rand() / RAND_MAX) * led_count * 0.8f + led_count * 0.1f; // 避免太靠边
-        float symmetry_intensity = fminf(total_energy / 150.0f, 0.7f);
-        
-        // 对称波纹颜色（根据主要能量）
-        rgb_color_t symmetry_color;
-        if (low_energy > mid_energy && low_energy > high_energy) {
-            symmetry_color = hsv_to_rgb(0.05f, 0.8f, 1.0f); // 橙色
-        } else if (mid_energy > low_energy && mid_energy > high_energy) {
-            symmetry_color = hsv_to_rgb(0.35f, 0.8f, 1.0f); // 青色
-        } else {
-            symmetry_color = hsv_to_rgb(0.75f, 0.8f, 1.0f); // 紫色
-        }
-        
-        // 创建对称波纹（左右对称）
-        for (int d = 0; d < 10; d++) {
-            int left_pos = (int)(center_pos - d);
-            int right_pos = (int)(center_pos + d);
-            
-            float distance_factor = 1.0f - (float)d / 10.0f;
-            float intensity = symmetry_intensity * distance_factor * distance_factor;
-            
-            rgb_color_t ring_color = {
-                .r = (uint8_t)(symmetry_color.r * intensity),
-                .g = (uint8_t)(symmetry_color.g * intensity),
-                .b = (uint8_t)(symmetry_color.b * intensity)
-            };
-            
-            if (left_pos >= 0 && left_pos < led_count) {
-                set_buffer_pixel_blend(left_pos, ring_color, 0.7f);
-            }
-            if (right_pos >= 0 && right_pos < led_count) {
-                set_buffer_pixel_blend(right_pos, ring_color, 0.7f);
-            }
-        }
-    }
-    
-    // 9. 应用颜色缓冲区到LED
+
     return apply_color_buffer();
 }
 
@@ -1466,7 +1197,7 @@ static esp_err_t energy_wave_effect(float *energy_bands, int num_bands) {
         energy_wave_state.pulse_wave = 1.0f; // 触发脉冲波
         
         // 节拍时色调偏移
-        energy_wave_state.hue_shift += 0.1f;
+        energy_wave_state.hue_shift += 0.1f * g_fx.color_speed;
         if (energy_wave_state.hue_shift > 1.0f) energy_wave_state.hue_shift -= 1.0f;
     }
     last_bass_energy = bass_energy;
@@ -1808,7 +1539,7 @@ static esp_err_t fireworks_effect_improved(float *energy_bands, int num_bands) {
     for (int i = 0; i < 30; i++) {
         if (fireworks_state.particles[i].active) {
             // 更新粒子位置和亮度
-            fireworks_state.particles[i].position += fireworks_state.particles[i].velocity;
+            fireworks_state.particles[i].position += fireworks_state.particles[i].velocity * g_fx.speed;
             fireworks_state.particles[i].lifetime--;
             
             // 更新粒子亮度（指数衰减）
@@ -2095,8 +1826,8 @@ static void init_meteor_pulse(int index, float total_energy, float bass_energy,
     
     // 动态速度：能量越高速度越快
     float speed_factor = fminf(total_energy / 80.0f, 1.0f);
-    meteor->speed = meteor_pulse_state.min_speed + 
-                   (meteor_pulse_state.max_speed - meteor_pulse_state.min_speed) * speed_factor;
+    meteor->speed = (meteor_pulse_state.min_speed + 
+                    (meteor_pulse_state.max_speed - meteor_pulse_state.min_speed) * speed_factor) * g_fx.speed;
     
     // 动态长度：能量变化越大，流星越长
     float length_factor = fminf(energy_variance * 2.0f, 1.0f);
@@ -2112,7 +1843,7 @@ static void init_meteor_pulse(int index, float total_energy, float bass_energy,
     meteor->trail_width = 0.5f + (meteor->length * 0.05f);
     
     // 颜色生成：根据频谱能量分布
-    meteor_pulse_state.color_hue += meteor_pulse_state.hue_speed;
+    meteor_pulse_state.color_hue += meteor_pulse_state.hue_speed * g_fx.color_speed;
     if (meteor_pulse_state.color_hue > 1.0f) {
         meteor_pulse_state.color_hue -= 1.0f;
     }
@@ -2502,86 +2233,66 @@ static esp_err_t meteor_pulse_effect(float *energy_bands, int num_bands) {
     
     return apply_color_buffer();
 }
-// 节奏呼吸效果 - 随节拍闪烁
+// 节奏呼吸效果 - 音频包络驱动的径向呼吸（混合式：能量包络+鼓点深呼吸+BPM微起伏）
 static esp_err_t rhythm_breath_effect(float *energy_bands, int num_bands) {
+    (void)energy_bands;
+    (void)num_bands;
     if (!strip) return ESP_ERR_INVALID_STATE;
-    
+
     clear_color_buffer();
-    
-    float bass_energy = 0;
-    if (energy_bands && num_bands > 0) {
-        for (int i = 0; i < num_bands && i < 3; i++) {
-            bass_energy += energy_bands[i];
-        }
+
+    const led_beat_t *b = led_get_beat();
+
+    float loud = fminf(b->energy / 120.0f, 1.0f);
+
+    static float s_env = 0.0f;
+    static float s_hue = 0.0f;
+    if (loud > s_env) {
+        s_env += (loud - s_env) * 0.5f;
+    } else {
+        float release = 0.03f / fmaxf(g_fx.speed, 0.2f);
+        s_env += (loud - s_env) * release;
     }
-    
-    rhythm_breath_state.bass_energy_history[rhythm_breath_state.energy_history_index] = bass_energy;
-    rhythm_breath_state.energy_history_index = (rhythm_breath_state.energy_history_index + 1) % 5;
-    
-    float avg_bass_energy = 0;
-    for (int i = 0; i < 5; i++) {
-        avg_bass_energy += rhythm_breath_state.bass_energy_history[i];
+    if (b->onset) {
+        s_env = fminf(s_env + 0.35f, 1.0f);
     }
-    avg_bass_energy /= 5.0f;
-    
-    if (bass_energy > rhythm_breath_state.beat_threshold && 
-        bass_energy > avg_bass_energy * 1.3f) {
-        rhythm_breath_state.last_beat_time = animation_counter;
-        rhythm_breath_state.flash_intensity = fminf(bass_energy / 80.0f, 1.0f);
-        
-        if (bass_energy > 50) {
-            rhythm_breath_state.flash_color = (rgb_color_t){255, 50, 0};
-        } else if (bass_energy > 30) {
-            rhythm_breath_state.flash_color = (rgb_color_t){255, 150, 30};
-        } else {
-            rhythm_breath_state.flash_color = (rgb_color_t){255, 255, 100};
-        }
+    float env = fminf(s_env + fx_beat() * 0.4f, 1.0f);
+
+    float sum = b->bass + b->mid + b->high + 0.001f;
+    float tone = (b->mid / sum) * 0.5f + (b->high / sum) * 1.0f;
+    s_hue += 0.0009f * g_fx.color_speed;
+    if (s_hue > 1.0f) s_hue -= 1.0f;
+    float base_hue = tone * 0.62f + s_hue;
+
+    float bpm = b->bpm ? (float)b->bpm : 72.0f;
+    rhythm_breath_state.breath_phase += 2.0f * 3.1416f * (bpm / 60.0f) * 0.01f * g_fx.speed;
+    if (rhythm_breath_state.breath_phase > 2.0f * 3.1416f) {
+        rhythm_breath_state.breath_phase -= 2.0f * 3.1416f;
     }
-    
-    rhythm_breath_state.breath_phase += rhythm_breath_state.breath_speed;
-    if (rhythm_breath_state.breath_phase > 2 * M_PI) {
-        rhythm_breath_state.breath_phase -= 2 * M_PI;
-    }
-    
-    rhythm_breath_state.color_hue += rhythm_breath_state.hue_speed;
-    if (rhythm_breath_state.color_hue > 1.0f) {
-        rhythm_breath_state.color_hue -= 1.0f;
-    }
-    
-    if (rhythm_breath_state.flash_intensity > 0) {
-        rhythm_breath_state.flash_intensity *= rhythm_breath_state.flash_decay_rate;
-        if (rhythm_breath_state.flash_intensity < 0.01f) {
-            rhythm_breath_state.flash_intensity = 0;
-        }
-    }
-    
-    float breath_value = (sinf(rhythm_breath_state.breath_phase) + 1.0f) * 0.5f;
-    float breath_intensity = rhythm_breath_state.breath_min + 
-                           breath_value * (rhythm_breath_state.breath_max - rhythm_breath_state.breath_min);
-    
+    float bpm_osc = 0.5f + 0.5f * sinf(rhythm_breath_state.breath_phase);
+
+    float center = (led_count - 1) * 0.5f;
+    if (center < 1.0f) center = 1.0f;
+    float width = 0.35f + 1.15f * env;
+
     for (int i = 0; i < led_count; i++) {
-        float hue = fmodf(rhythm_breath_state.color_hue + ((float)i / led_count * 0.3f), 1.0f);
-        rgb_color_t base_color = hsv_to_rgb(hue, 0.9f, breath_intensity);
-        
-        if (rhythm_breath_state.flash_intensity > 0.01f) {
-            float center_pos = led_count * 0.5f;
-            float distance = fabsf((float)i - center_pos);
-            float center_factor = 1.0f - (distance / (led_count * 0.5f));
-            if (center_factor < 0) center_factor = 0;
-            
-            float flash_strength = rhythm_breath_state.flash_intensity * center_factor;
-            
-            base_color.r = (uint8_t)(base_color.r * (1.0f - flash_strength) + 
-                                   rhythm_breath_state.flash_color.r * flash_strength);
-            base_color.g = (uint8_t)(base_color.g * (1.0f - flash_strength) + 
-                                   rhythm_breath_state.flash_color.g * flash_strength);
-            base_color.b = (uint8_t)(base_color.b * (1.0f - flash_strength) + 
-                                   rhythm_breath_state.flash_color.b * flash_strength);
-        }
-        
-        set_buffer_pixel(i, base_color);
+        float d = fabsf((float)i - center) / center;
+        float radial = fmaxf(0.0f, 1.0f - d / width);
+        radial = radial * radial;
+
+        float amp = (0.28f + 0.72f * env) * radial + 0.10f * bpm_osc * (1.0f - d);
+        if (amp > 1.0f) amp = 1.0f;
+
+        float value = rhythm_breath_state.breath_min +
+                      (rhythm_breath_state.breath_max - rhythm_breath_state.breath_min) * amp;
+        float hue = base_hue + 0.12f * d;
+        float sat = 0.9f - 0.25f * env;
+        if (sat < 0.5f) sat = 0.5f;
+
+        rgb_color_t color = hsv_to_rgb(hue, sat, value);
+        set_buffer_pixel(i, color);
     }
-    
+
     return apply_color_buffer();
 }
 
@@ -2667,8 +2378,7 @@ static esp_err_t rhythm_jump_effect(float *energy_bands, int num_bands) {
         global_energy /= num_bands;
     }
 
-    const led_beat_t *beat = led_get_beat();
-    float rj_pulse = beat->pulse;
+    float rj_pulse = s_beat.pulse * (0.5f + g_fx.beat_react);
     
     float band_energies[8] = {0};
     if (energy_bands && num_bands > 0) {
@@ -2738,7 +2448,7 @@ static esp_err_t rhythm_jump_effect(float *energy_bands, int num_bands) {
     update_physics_simulation();
     
     // 颜色变化
-    rhythm_jump_state.color_hue += rhythm_jump_state.hue_speed;
+    rhythm_jump_state.color_hue += rhythm_jump_state.hue_speed * g_fx.color_speed;
     if (rhythm_jump_state.color_hue > 1.0f) {
         rhythm_jump_state.color_hue -= 1.0f;
     }
@@ -2986,12 +2696,12 @@ static esp_err_t sparkle_rainbow_effect(float *energy_bands, int num_bands) {
         }
     }
     
-    sparkle_rainbow_state.hue_base += sparkle_rainbow_state.hue_speed;
+    sparkle_rainbow_state.hue_base += sparkle_rainbow_state.hue_speed * g_fx.color_speed;
     if (sparkle_rainbow_state.hue_base > 1.0f) {
         sparkle_rainbow_state.hue_base -= 1.0f;
     }
     
-    sparkle_rainbow_state.rainbow_offset += sparkle_rainbow_state.rainbow_speed;
+    sparkle_rainbow_state.rainbow_offset += sparkle_rainbow_state.rainbow_speed * g_fx.speed;
     if (sparkle_rainbow_state.rainbow_offset > 1.0f) {
         sparkle_rainbow_state.rainbow_offset -= 1.0f;
     }
@@ -3069,7 +2779,7 @@ static esp_err_t sparkle_rainbow_effect(float *energy_bands, int num_bands) {
         
         if (!sparkle->active) continue;
         
-        sparkle->position += sparkle->speed;
+        sparkle->position += sparkle->speed * g_fx.speed;
         sparkle->brightness = 0.7f + sinf(current_time * sparkle->flash_speed) * 0.3f;
         sparkle->lifetime--;
         
@@ -3325,7 +3035,7 @@ static void init_explosion(float position, float intensity, rgb_color_t core_col
 
 static rgb_color_t get_ion_color_from_energy(float bass_energy, float mid_energy, float high_energy, int direction) {
     if (direction == 1) {
-        explosion_collision_state.hue_left += explosion_collision_state.hue_speed;
+        explosion_collision_state.hue_left += explosion_collision_state.hue_speed * g_fx.color_speed;
         if (explosion_collision_state.hue_left > 1.0f) {
             explosion_collision_state.hue_left -= 1.0f;
         }
@@ -3346,7 +3056,7 @@ static rgb_color_t get_ion_color_from_energy(float bass_energy, float mid_energy
         
         return hsv_to_rgb(hue, saturation, value);
     } else {
-        explosion_collision_state.hue_right += explosion_collision_state.hue_speed;
+        explosion_collision_state.hue_right += explosion_collision_state.hue_speed * g_fx.color_speed;
         if (explosion_collision_state.hue_right > 1.0f) {
             explosion_collision_state.hue_right -= 1.0f;
         }
@@ -3445,7 +3155,7 @@ static void update_explosion_particles(void) {
             }
             
             // 更新位置
-            p->position += p->velocity * (float)p->direction;
+            p->position += p->velocity * (float)p->direction * g_fx.speed;
             
             // 边界检查
             if (p->position < 0 || p->position >= led_count) {
@@ -3565,7 +3275,7 @@ static esp_err_t explosion_collision_effect(float *energy_bands, int num_bands) 
             // 更新离子位置
             if (explosion_collision_state.left_ion.active) {
                 explosion_collision_state.left_ion.position += 
-                    explosion_collision_state.left_ion.velocity;
+                    explosion_collision_state.left_ion.velocity * g_fx.speed;
                 
                 // 添加一些动态效果：速度随能量变化
                 explosion_collision_state.left_ion.velocity *= 1.001f;
@@ -3577,7 +3287,7 @@ static esp_err_t explosion_collision_effect(float *energy_bands, int num_bands) 
             
             if (explosion_collision_state.right_ion.active) {
                 explosion_collision_state.right_ion.position += 
-                    explosion_collision_state.right_ion.velocity;
+                    explosion_collision_state.right_ion.velocity * g_fx.speed;
                 
                 explosion_collision_state.right_ion.velocity *= 1.001f;
                 
@@ -4014,10 +3724,12 @@ static esp_err_t peak_hold_effect(float *energy_bands, int num_bands)
         if (s_pk_peak[i] < 0.002f) s_pk_peak[i] = 0.0f;
 
         float value = 0.10f + 0.90f * (0.45f * s_pk_level[i] + 0.55f * s_pk_peak[i]);
+        value += fx_beat() * 0.5f;
         if (value > 1.0f) value = 1.0f;
 
         float hue = eq_hue_at(i, led_count);
-        bool hot = (s_pk_level[i] >= s_pk_peak[i] - 0.03f) && (s_pk_level[i] > 0.30f);
+        bool hot = ((s_pk_level[i] >= s_pk_peak[i] - 0.03f) && (s_pk_level[i] > 0.30f)) ||
+                   (s_beat.onset && s_beat.bass > 25.0f);
 
         rgb_color_t color;
         if (hot) {
@@ -4081,7 +3793,7 @@ static esp_err_t rainbow_effect(float *energy_bands, int num_bands)
     (void)energy_bands;
     (void)num_bands;
     for (int i = 0; i < led_count; i++) {
-        float hue = (float)(i + animation_counter / 10.0) / led_count;
+        float hue = (float)(i + animation_counter * g_fx.speed / 10.0) / led_count;
         hue = hue - (int)hue;
         rgb_color_t color = hsv_to_rgb(hue, 1.0, 0.5);
         led_out_pixel(i, color);
@@ -4089,21 +3801,60 @@ static esp_err_t rainbow_effect(float *energy_bands, int num_bands)
     return ESP_OK;
 }
 
-static esp_err_t debug_effect(float *energy_bands, int num_bands)
+// 星空：多颗星辰在灯带上循环漂移，鼓点触发“超空间”加速+拖尾，高音让星点闪烁
+#define SF_MAX 9
+static struct { float pos; float spd; float size; float tw; float hue; } s_star[SF_MAX];
+static bool s_star_init = false;
+
+static esp_err_t starfield_effect(float *energy_bands, int num_bands)
 {
     (void)energy_bands;
     (void)num_bands;
-    for (int i = 0; i < led_count; i++) {
-        rgb_color_t color = {0, 0, 0};
-        int segment = led_count > 0 ? i / (led_count / 3 + 1) : 0;
-        switch (segment) {
-            case 0: color.r = 100; break;
-            case 1: color.g = 100; break;
-            case 2: color.b = 100; break;
+    if (!strip) return ESP_ERR_INVALID_STATE;
+    if (led_count <= 0) return ESP_OK;
+
+    if (!s_star_init) {
+        for (int i = 0; i < SF_MAX; i++) {
+            s_star[i].pos = ((float)rand() / RAND_MAX) * led_count;
+            s_star[i].spd = 0.15f + (float)i / SF_MAX * 0.85f;
+            s_star[i].size = 0.35f + ((float)rand() / RAND_MAX) * 0.65f;
+            s_star[i].tw = ((float)rand() / RAND_MAX) * 6.283f;
+            s_star[i].hue = 0.5f + ((float)rand() / RAND_MAX) * 0.15f;
         }
-        led_out_pixel(i, color);
+        s_star_init = true;
     }
-    return ESP_OK;
+
+    const led_beat_t *b = led_get_beat();
+    float beat = fx_beat();
+    float treble = fminf(b->high / 120.0f, 1.0f);
+
+    clear_color_buffer();
+    for (int i = 0; i < SF_MAX; i++) {
+        float st = s_star[i].spd * (1.0f + beat * 3.5f) * fmaxf(g_fx.speed, 0.2f);
+        s_star[i].pos += st;
+        while (s_star[i].pos >= led_count) s_star[i].pos -= led_count;
+        if (s_star[i].pos < 0) s_star[i].pos += led_count;
+
+        float twinkle = 0.55f + 0.45f * sinf((float)animation_counter * (0.2f + treble * 0.9f) + s_star[i].tw);
+        float bright = s_star[i].size * (0.6f + 0.7f * beat) * twinkle;
+        if (bright > 1.0f) bright = 1.0f;
+        float sigma = 0.7f + s_star[i].size * 0.8f;
+        float sat = 0.85f - 0.6f * (0.5f * beat + 0.5f * treble);
+        if (sat < 0.12f) sat = 0.12f;
+
+        for (int led = 0; led < led_count; led++) {
+            float dd = fabsf((float)led - s_star[i].pos);
+            float wrap = (float)led_count - dd;
+            float dist = dd < wrap ? dd : wrap;
+            float g = expf(-(dist * dist) / (2.0f * sigma * sigma));
+            float v = g * bright;
+            if (v > 0.02f) {
+                rgb_color_t color = hsv_to_rgb(s_star[i].hue, sat, v > 1.0f ? 1.0f : v);
+                set_buffer_pixel_blend(led, color, v);
+            }
+        }
+    }
+    return apply_color_buffer();
 }
 
 static esp_err_t led_off_effect(float *energy_bands, int num_bands)
@@ -4114,6 +3865,135 @@ static esp_err_t led_off_effect(float *energy_bands, int num_bands)
     return apply_color_buffer();
 }
 
+static esp_err_t mirror_effect(float *energy_bands, int num_bands)
+{
+    if (!strip) return ESP_ERR_INVALID_STATE;
+    if (!energy_bands || num_bands <= 0) return ESP_OK;
+
+    float maxe = 1.0f;
+    for (int i = 0; i < num_bands; i++) if (energy_bands[i] > maxe) maxe = energy_bands[i];
+
+    float half = (led_count - 1) * 0.5f;
+    if (half < 1.0f) half = 1.0f;
+    float beat = fx_beat();
+
+    for (int i = 0; i < led_count; i++) {
+        float d = fabsf((float)i - half) / half;   // 0=中心(低频) 1=两端(高频)
+        int band = (int)(d * (num_bands - 1));
+        if (band >= num_bands) band = num_bands - 1;
+
+        float v = energy_bands[band] / maxe;
+        v = sqrtf(v);
+        v += 0.25f * beat * (1.0f - d);
+        if (v > 1.0f) v = 1.0f;
+
+        float value = 0.05f + 0.95f * v;
+        float hue = d * 0.72f;                     // 左右对称：中心暖色 -> 边缘冷色
+        rgb_color_t color = hsv_to_rgb(hue, 0.9f, value);
+        led_out_pixel(i, color);
+    }
+    return ESP_OK;
+}
+
+#define SHOCKWAVE_MAX 6
+static struct { bool on; float wf; float strength; float hue; } s_sw[SHOCKWAVE_MAX];
+static int s_sw_next = 0;
+
+static esp_err_t shockwave_effect(float *energy_bands, int num_bands)
+{
+    (void)energy_bands;
+    (void)num_bands;
+    if (!strip) return ESP_ERR_INVALID_STATE;
+
+    float half = (led_count - 1) * 0.5f;
+    if (half < 1.0f) half = 1.0f;
+
+    if (s_beat.onset) {
+        int slot = -1;
+        for (int k = 0; k < SHOCKWAVE_MAX; k++) if (!s_sw[k].on) { slot = k; break; }
+        if (slot < 0) { slot = s_sw_next % SHOCKWAVE_MAX; s_sw_next++; }
+        s_sw[slot].on = true;
+        s_sw[slot].wf = 0.0f;
+        s_sw[slot].strength = 1.0f;
+        s_sw[slot].hue += 0.17f;
+        if (s_sw[slot].hue > 1.0f) s_sw[slot].hue -= 1.0f;
+    }
+
+    for (int i = 0; i < led_count; i++) {
+        float d = fabsf((float)i - half) / half;
+        float acc = 0.0f, hue = 0.0f;
+        for (int k = 0; k < SHOCKWAVE_MAX; k++) {
+            if (!s_sw[k].on) continue;
+            float dist = fabsf(d - s_sw[k].wf);
+            float c = s_sw[k].strength * fmaxf(0.0f, 1.0f - dist / 0.18f);
+            if (c > acc) { acc = c; hue = s_sw[k].hue; }
+        }
+        float core = fx_beat() * (1.0f - d);
+        if (core > acc) { acc = core; hue = 0.0f; }
+        if (acc > 1.0f) acc = 1.0f;
+
+        float value = 0.03f + 0.97f * acc;
+        rgb_color_t color = hsv_to_rgb(hue, 0.9f, value);
+        led_out_pixel(i, color);
+    }
+
+    for (int k = 0; k < SHOCKWAVE_MAX; k++) {
+        if (!s_sw[k].on) continue;
+        s_sw[k].wf += 0.03f * g_fx.speed;
+        s_sw[k].strength *= 0.955f;
+        if (s_sw[k].strength < 0.04f || s_sw[k].wf > 1.15f) s_sw[k].on = false;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t aurora_effect(float *energy_bands, int num_bands)
+{
+    if (!strip) return ESP_ERR_INVALID_STATE;
+    float lvl = 0.35f;
+    if (energy_bands && num_bands > 0) {
+        float mx = 1.0f;
+        for (int i = 0; i < num_bands; i++) if (energy_bands[i] > mx) mx = energy_bands[i];
+        lvl = 0.25f + 0.75f * fminf(mx / 120.0f, 1.0f);
+    }
+    float t = (float)animation_counter * 0.05f * g_fx.speed;
+    for (int i = 0; i < led_count; i++) {
+        float x = (float)i / (led_count > 1 ? led_count - 1 : 1);
+        float w1 = 0.5f + 0.5f * sinf(x * 6.2832f * 2.0f + t);
+        float w2 = 0.5f + 0.5f * sinf(x * 6.2832f * 3.0f - t * 0.7f);
+        float v = (w1 * 0.6f + w2 * 0.4f) * lvl;
+        if (v > 1.0f) v = 1.0f;
+        float value = 0.04f + 0.96f * v;
+        float hue = x * 0.45f + t * 0.02f * g_fx.color_speed;
+        rgb_color_t color = hsv_to_rgb(hue, 0.85f, value);
+        led_out_pixel(i, color);
+    }
+    return ESP_OK;
+}
+
+static esp_err_t heartbeat_effect(float *energy_bands, int num_bands)
+{
+    (void)energy_bands;
+    (void)num_bands;
+    if (!strip) return ESP_ERR_INVALID_STATE;
+
+    static float hb_env = 0.0f;
+    if (s_beat.onset) hb_env = 1.0f;
+    hb_env *= 0.90f;
+    float p = fmaxf(hb_env, fx_beat());
+
+    float half = (led_count - 1) * 0.5f;
+    if (half < 1.0f) half = 1.0f;
+    for (int i = 0; i < led_count; i++) {
+        float d = fabsf((float)i - half) / half;   // 中心最亮，向两端衰减
+        float value = 0.04f + 0.96f * p * (1.0f - 0.6f * d);
+        if (value > 1.0f) value = 1.0f;
+        float hue = 0.97f;                          // 红色心跳
+        rgb_color_t color = hsv_to_rgb(hue, 0.95f, value);
+        led_out_pixel(i, color);
+    }
+    return ESP_OK;
+}
+
 typedef struct {
     led_mode_t mode;
     esp_err_t (*render)(float *energy_bands, int num_bands);
@@ -4122,7 +4002,7 @@ typedef struct {
 static const led_effect_entry_t s_led_effects[] = {
     { MODE_SPECTRUM, spectrum_effect },
     { MODE_RAINBOW, rainbow_effect },
-    { MODE_DEBUG, debug_effect },
+    { MODE_STARFIELD, starfield_effect },
     { MODE_METEOR_PULSE, meteor_pulse_effect },
     { MODE_WATER_RIPPLE, water_ripple_effect },
     { MODE_ENERGY_WAVE, energy_wave_effect },
@@ -4134,6 +4014,10 @@ static const led_effect_entry_t s_led_effects[] = {
     { MODE_EXPLOSION, explosion_collision_effect },
     { MODE_PEAK_HOLD, peak_hold_effect },
     { MODE_OFF, led_off_effect },
+    { MODE_MIRROR, mirror_effect },
+    { MODE_SHOCKWAVE, shockwave_effect },
+    { MODE_AURORA, aurora_effect },
+    { MODE_HEARTBEAT, heartbeat_effect },
 };
 
 #define LED_EFFECT_COUNT (sizeof(s_led_effects) / sizeof(s_led_effects[0]))
@@ -4142,16 +4026,26 @@ esp_err_t led_update_visualization(float *energy_bands, int num_bands)
 {
     if (!strip) return ESP_ERR_INVALID_STATE;
 
-    if (current_mode != MODE_RAINBOW && current_mode != MODE_DEBUG &&
+    if (current_mode != MODE_RAINBOW && current_mode != MODE_STARFIELD &&
         current_mode != MODE_OFF && energy_bands == NULL) {
         static float zero_bands[NUM_FREQ_BANDS] = {0};
         energy_bands = zero_bands;
         num_bands = NUM_FREQ_BANDS;
     }
 
+    if (energy_bands != NULL) {
+        static float s_scaled[NUM_FREQ_BANDS];
+        int nn = num_bands;
+        if (nn > NUM_FREQ_BANDS) nn = NUM_FREQ_BANDS;
+        for (int i = 0; i < nn; i++) s_scaled[i] = fx_sens(energy_bands[i]);
+        energy_bands = s_scaled;
+        num_bands = nn;
+    }
+
     animation_counter++;
 
     led_beat_update(energy_bands, num_bands);
+    led_update_display_spectrum(energy_bands, num_bands);
 
     for (size_t i = 0; i < LED_EFFECT_COUNT; i++) {
         if (s_led_effects[i].mode == current_mode) {

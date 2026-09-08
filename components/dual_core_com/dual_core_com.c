@@ -136,7 +136,7 @@ void dual_core_com_get_status(core_status_t *status)
 void dual_core_com_update_status(led_mode_t new_mode, uint32_t frame_count)
 {
     if (status_mutex != NULL && xSemaphoreTake(status_mutex, portMAX_DELAY) == pdTRUE) {
-        if (new_mode >= MODE_SPECTRUM && new_mode <= MODE_OFF) {
+        if (new_mode >= MODE_SPECTRUM && new_mode < MODE_COUNT) {
             current_status.current_mode = new_mode;
         }
         
@@ -154,6 +154,8 @@ void dual_core_com_update_status(led_mode_t new_mode, uint32_t frame_count)
         current_status.pulse = (uint8_t)p;
         current_status.energy = b->energy;
         led_get_post_params(&current_status.gamma, &current_status.gate, &current_status.afterimage);
+        current_status.fx = *led_get_fx();
+        led_get_spectrum(current_status.bands, NUM_FREQ_BANDS);
 
         xSemaphoreGive(status_mutex);
     }

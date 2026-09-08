@@ -19,6 +19,7 @@ typedef enum {
     CMD_BRIGHTNESS_SET,   // 设置亮度（data.param.value: 0-100）
     CMD_TEST_RAINBOW,     // 测试彩虹
     CMD_POST_SET,         // 设置全局后处理参数（data.post）
+    CMD_FX_SET,           // 设置统一效果参数（data.fx）
     CMD_SET_PARAM,        // 设置参数
     CMD_GET_STATUS        // 获取状态
 } core_command_type_t;
@@ -37,6 +38,14 @@ typedef struct {
             uint8_t gate;             // 0-64 噪声门
             float afterimage;         // 0-0.9 余晖
         } post;
+        struct {
+            float speed;
+            float intensity;
+            float sensitivity;
+            float hue;
+            float color_speed;
+            float beat_react;
+        } fx;
     } data;
 } core_command_t;
 
@@ -53,6 +62,8 @@ typedef struct {
     float gamma;                      // 后处理 gamma
     uint8_t gate;                     // 后处理噪声门
     float afterimage;                 // 后处理余晖
+    led_fx_t fx;                      // 统一效果参数快照
+    uint8_t bands[NUM_FREQ_BANDS];    // 归一化显示频谱（0-255）
 } core_status_t;
 
 // 音频数据结构

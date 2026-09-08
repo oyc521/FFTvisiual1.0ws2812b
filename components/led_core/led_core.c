@@ -33,7 +33,7 @@ static struct {
 
 // 模式切换处理函数
 static void handle_mode_change(led_mode_t new_mode) {
-    if (new_mode >= MODE_SPECTRUM && new_mode <= MODE_OFF) {
+    if (new_mode >= MODE_SPECTRUM && new_mode < MODE_COUNT) {
         current_mode = new_mode;
         led_set_mode(new_mode);
         ESP_LOGI(TAG, "模式切换到: %d", new_mode);
@@ -72,6 +72,21 @@ static void handle_command(core_command_t *cmd) {
             ESP_LOGI(TAG, "后处理更新: gamma=%.2f gate=%u afterimage=%.2f",
                      (double)cmd->data.post.gamma, (unsigned)cmd->data.post.gate, (double)cmd->data.post.afterimage);
             break;
+
+        case CMD_FX_SET: {
+            led_fx_t fx = {
+                .speed = cmd->data.fx.speed,
+                .intensity = cmd->data.fx.intensity,
+                .sensitivity = cmd->data.fx.sensitivity,
+                .hue = cmd->data.fx.hue,
+                .color_speed = cmd->data.fx.color_speed,
+                .beat_react = cmd->data.fx.beat_react,
+            };
+            led_set_fx(&fx);
+            ESP_LOGI(TAG, "风格参数更新 speed=%.2f sens=%.2f hue=%.2f",
+                     (double)fx.speed, (double)fx.sensitivity, (double)fx.hue);
+            break;
+        }
             
         case CMD_TEST_RAINBOW:
             // 测试彩虹效果
@@ -141,6 +156,11 @@ static void handle_idle_animation(void) {
         case MODE_SPARKLE_RAINBOW:
         case MODE_EXPLOSION:
         case MODE_PEAK_HOLD:
+        case MODE_MIRROR:
+        case MODE_SHOCKWAVE:
+        case MODE_AURORA:
+        case MODE_HEARTBEAT:
+        case MODE_STARFIELD:
             // 这些增强效果也需要处理无音频数据的情况
             led_update_visualization(zero_frequency_bands, NUM_FREQ_BANDS);
             break;
@@ -314,7 +334,7 @@ esp_err_t led_core_get_stats(led_core_stats_t *stats) {
 
 // 手动触发测试效果
 esp_err_t led_core_test_effect(led_mode_t test_mode) {
-    if (test_mode < MODE_DEBUG || test_mode > MODE_OFF) {
+    if (test_mode < MODE_STARFIELD || test_mode > MODE_OFF) {
         return ESP_ERR_INVALID_ARG;
     }
     

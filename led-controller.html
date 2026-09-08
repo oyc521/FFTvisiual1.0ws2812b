@@ -150,6 +150,12 @@
     <div class="grid">
         <div>
             <div class="card">
+                <h2><span class="bar"></span>实时频谱 (32 段)</h2>
+                <canvas id="spec" style="width:100%;height:150px;display:block;border-radius:12px;background:rgba(0,0,0,0.25);"></canvas>
+                <div class="beat"><span>低频 20Hz</span><span id="spec-state" style="color:var(--muted)">— 未连接 —</span><span>8kHz 高频</span></div>
+            </div>
+
+            <div class="card">
                 <h2><span class="bar"></span>显示模式</h2>
                 <div class="modes" id="modes"></div>
             </div>
@@ -174,6 +180,24 @@
                     <button class="btn" style="align-self:flex-end" onclick="resetPost()">恢复默认</button>
                 </div>
                 <div class="hint">噪声门越大底色越黑、鼓点越突出；Gamma 越大明暗对比越强；余晖让运动带拖尾。</div>
+            </div>
+
+            <div class="card">
+                <h2><span class="bar"></span>全局风格 (所有模式共用)</h2>
+                <div class="row">
+                    <div class="field"><label>动画速度 <b id="v-speed">1.0</b></label><input type="range" id="s-speed" min="0.2" max="3.0" step="0.1" value="1.0"></div>
+                    <div class="field"><label>幅度增益 <b id="v-intensity">1.0</b></label><input type="range" id="s-intensity" min="0.2" max="2.0" step="0.1" value="1.0"></div>
+                </div>
+                <div class="row">
+                    <div class="field"><label>音频灵敏度 <b id="v-sensitivity">1.0</b></label><input type="range" id="s-sensitivity" min="0.2" max="4.0" step="0.1" value="1.0"></div>
+                    <div class="field"><label>鼓点联动 <b id="v-beat">0.60</b></label><input type="range" id="s-beat" min="0" max="1.0" step="0.05" value="0.6"></div>
+                </div>
+                <div class="row">
+                    <div class="field"><label>色相偏移 <b id="v-hue">0.00</b></label><input type="range" id="s-hue" min="0" max="1.0" step="0.02" value="0"></div>
+                    <div class="field"><label>变色速度 <b id="v-color">1.0</b></label><input type="range" id="s-color" min="0" max="4.0" step="0.1" value="1.0"></div>
+                </div>
+                <div class="row"><button class="btn" onclick="resetFx()">恢复默认</button></div>
+                <div class="hint">这套参数对所有模式生效：灵敏度=声音→画面的映射，鼓点联动=踩点强弱，色相/变色=整体配色。</div>
             </div>
 
             <div class="card">
@@ -267,9 +291,9 @@
 const MODES = [
     {n:0,  ic:'📊', name:'频谱'},
     {n:1,  ic:'🌈', name:'彩虹'},
-    {n:2,  ic:'🔧', name:'调试'},
+    {n:2,  ic:'🌠', name:'星空'},
     {n:3,  ic:'☄️', name:'流星脉冲'},
-    {n:4,  ic:'💧', name:'水波纹'},
+    {n:4, ic:'🏀', name:'弹跳小球'},
     {n:5,  ic:'🌊', name:'能量波'},
     {n:6,  ic:'🎆', name:'烟花'},
     {n:7,  ic:'💥', name:'节奏脉冲'},
@@ -278,6 +302,10 @@ const MODES = [
     {n:10, ic:'✨', name:'闪光彩虹'},
     {n:11, ic:'🧨', name:'爆炸碰撞'},
     {n:12, ic:'📈', name:'波峰余晖'},
+    {n:14, ic:'🪞', name:'对称频谱'},
+    {n:15, ic:'💫', name:'节拍冲击波'},
+    {n:16, ic:'🌌', name:'极光辉光'},
+    {n:17, ic:'❤️', name:'心跳闪动'},
     {n:13, ic:'⚫', name:'关闭'}
 ];
 
@@ -361,6 +389,7 @@ async function refresh(){
             if(s.gate!==undefined){ el('s-gate').value=s.gate; el('v-gate').textContent=s.gate; }
             if(s.afterimage!==undefined){ el('s-after').value=s.afterimage; el('v-after').textContent=Number(s.afterimage).toFixed(2); }
         }
+        syncFxFromStatus(s);
     }catch(e){
         el('conn-dot').className='dot'; el('conn-text').textContent='连接失败';
     }
@@ -381,6 +410,84 @@ function queuePost(){
 }
 function resetPost(){ el('s-gamma').value=1.18; el('s-gate').value=8; el('s-after').value=0.62; queuePost(); }
 
+let fxTimer=null, scrubFx=false;
+const FXMAP = [
+    ['s-speed','v-speed','speed',1],
+    ['s-intensity','v-intensity','intensity',1],
+    ['s-sensitivity','v-sensitivity','sensitivity',1],
+    ['s-hue','v-hue','hue',2],
+    ['s-color','v-color','color_speed',1],
+    ['s-beat','v-beat','beat_react',2]
+];
+function fxVals(){ const o={}; FXMAP.forEach(m=> o[m[2]]=parseFloat(el(m[0]).value)); return o; }
+function fxDisp(){ FXMAP.forEach(m=> el(m[1]).textContent = parseFloat(el(m[0]).value).toFixed(m[3])); }
+function queueFx(){
+    fxDisp(); scrubFx=true;
+    clearTimeout(fxTimer);
+    const v=fxVals();
+    fxTimer=setTimeout(async()=>{
+        try{ await api(`/api/fx?speed=${v.speed}&intensity=${v.intensity}&sensitivity=${v.sensitivity}&hue=${v.hue}&color_speed=${v.color_speed}&beat_react=${v.beat_react}`,'POST'); }
+        catch(e){ log('风格下发失败: '+e.message,'err'); }
+        setTimeout(()=>scrubFx=false, 1200);
+    }, 350);
+}
+function resetFx(){ el('s-speed').value=1.0; el('s-intensity').value=1.0; el('s-sensitivity').value=1.0; el('s-hue').value=0; el('s-color').value=1.0; el('s-beat').value=0.6; queueFx(); }
+
+// ===================== 实时频谱 (32 柱) =====================
+let specData = new Array(32).fill(0);
+let specPeaks = new Array(32).fill(0);
+async function pollSpec(){
+    if(!ip){ return; }
+    try{
+        const r = await api('/api/spectrum');
+        if(r && r.bands){
+            specData = r.bands;
+            el('spec-state').textContent = '● 已连接';
+            el('spec-state').style.color = 'var(--ok)';
+            drawSpec();
+        }
+    }catch(e){
+        el('spec-state').textContent = '— 未连接 —';
+        el('spec-state').style.color = 'var(--muted)';
+    }
+}
+function drawSpec(){
+    const cv = el('spec'); if(!cv || !cv.getContext) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = cv.clientWidth, h = cv.clientHeight;
+    if(!w || !h) return;
+    if(cv.width !== Math.round(w*dpr) || cv.height !== Math.round(h*dpr)){ cv.width = Math.round(w*dpr); cv.height = Math.round(h*dpr); }
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.clearRect(0,0,w,h);
+    const N = specData.length, gap = 2;
+    const bw = (w - (N-1)*gap) / N;
+    for(let i=0;i<N;i++){
+        const v = Math.max(0, Math.min(1, specData[i]/255));
+        specPeaks[i] = Math.max(v, specPeaks[i] - 0.012);
+        const bh = v*h, ph = specPeaks[i]*h;
+        const hue = (i/(N-1))*250;
+        const x = i*(bw+gap);
+        const g = ctx.createLinearGradient(0,h,0,h-bh);
+        g.addColorStop(0, `hsl(${hue},90%,52%)`);
+        g.addColorStop(1, `hsl(${hue},96%,72%)`);
+        ctx.fillStyle = g;
+        ctx.fillRect(x, h-bh, bw, bh);
+        ctx.fillStyle = `hsla(${hue},100%,88%,0.9)`;
+        ctx.fillRect(x, Math.max(0,h-ph-2), bw, 2);
+    }
+}
+function syncFxFromStatus(s){
+    if(scrubFx || !s || !s.fx) return;
+    el('s-speed').value = s.fx.speed;
+    el('s-intensity').value = s.fx.intensity;
+    el('s-sensitivity').value = s.fx.sensitivity;
+    el('s-hue').value = s.fx.hue;
+    el('s-color').value = s.fx.color_speed;
+    el('s-beat').value = s.fx.beat_react;
+    fxDisp();
+}
+
 let brightTimer=null;
 function onBright(){
     const v=parseInt(el('s-bright').value);
@@ -398,12 +505,15 @@ document.addEventListener('DOMContentLoaded', ()=>{
         el('ota-btn').disabled = !otaFile;
     });
     ['s-gamma','s-gate','s-after'].forEach(id=> el(id).addEventListener('input', queuePost));
+    ['s-speed','s-intensity','s-sensitivity','s-hue','s-color','s-beat'].forEach(id=> el(id).addEventListener('input', queueFx));
+    fxDisp();
     el('s-bright').addEventListener('input', onBright);
     el('s-bright').addEventListener('pointerdown', ()=>scrubBright=true);
     el('s-bright').addEventListener('pointerup', ()=> setTimeout(()=>scrubBright=false,1000));
 
     buildModes();
     if(ip){ el('ip-label').textContent = ip; startPoll(); } else { openIp(); }
+    setInterval(pollSpec, 90);
     log('页面已加载，请设置设备 IP 后连接。','info');
 });
 

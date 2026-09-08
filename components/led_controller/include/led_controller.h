@@ -23,7 +23,7 @@ typedef struct {
 typedef enum {
     MODE_SPECTRUM = 0,      // 频谱显示
     MODE_RAINBOW = 1,       // 彩虹效果
-    MODE_DEBUG = 2,         // 调试模式
+    MODE_STARFIELD = 2,     // 星空（星辰漂移+鼓点超空间）
     MODE_METEOR_PULSE = 3,  // 流星脉冲
     MODE_WATER_RIPPLE = 4,  // 水波纹效果
     MODE_ENERGY_WAVE = 5,   // 能量波效果
@@ -34,7 +34,12 @@ typedef enum {
     MODE_SPARKLE_RAINBOW = 10, // 闪烁彩虹流水效果
     MODE_EXPLOSION = 11,    // 爆炸碰撞效果
     MODE_PEAK_HOLD = 12,    // 波峰余晖效果
-    MODE_OFF = 13           // 关闭
+    MODE_OFF = 13,          // 关闭
+    MODE_MIRROR = 14,       // 中心对称频谱 / VU
+    MODE_SHOCKWAVE = 15,    // 节拍冲击波
+    MODE_AURORA = 16,       // 极光辉光（氛围流动）
+    MODE_HEARTBEAT = 17,    // 心跳闪动（鼓点驱动）
+    MODE_COUNT              // 模式总数（上界，不可选）
 } led_mode_t;
 
 // 统一节拍/音频特征（每帧由 led_update_visualization 计算一次，供所有效果共享）
@@ -48,6 +53,25 @@ typedef struct {
     uint8_t bpm;    // 估计 BPM（0 表示未知）
     bool onset;     // 本帧是否检测到鼓点
 } led_beat_t;
+
+// 统一效果参数（全局风格，所有模式共享）
+typedef struct {
+    float speed;        // 0.2-3.0 动画时间倍率
+    float intensity;    // 0.2-2.0 幅度/亮度增益
+    float sensitivity;  // 0.2-4.0 音频->视觉映射增益
+    float hue;          // 0.0-1.0 全局色相偏移
+    float color_speed;  // 0.0-4.0 颜色流动速度
+    float beat_react;   // 0.0-1.0 鼓点联动强度
+} led_fx_t;
+
+// 设置全局效果参数
+esp_err_t led_set_fx(const led_fx_t *fx);
+
+// 读取全局效果参数
+const led_fx_t *led_get_fx(void);
+
+// 读取归一化后的 32 段显示频谱（每段 0-255），供网页实时频谱显示
+void led_get_spectrum(uint8_t *out, int n);
 
 // 获取当前节拍/音频特征（只读，供效果内使用）
 const led_beat_t *led_get_beat(void);

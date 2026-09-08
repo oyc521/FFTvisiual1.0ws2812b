@@ -394,7 +394,7 @@ static esp_err_t api_mode_set_handler(httpd_req_t *req) {
         ESP_LOGI(TAG, "Mode value: %d", mode);
 
         // 检查模式值是否有效 (0-12)
-        if (mode < MODE_SPECTRUM || mode > MODE_OFF) {
+        if (mode < MODE_SPECTRUM || mode >= MODE_COUNT) {
             cJSON *root = cJSON_CreateObject();
             cJSON_AddBoolToObject(root, "success", false);
             cJSON_AddStringToObject(root, "error", "Mode value out of range");
@@ -544,6 +544,15 @@ static esp_err_t api_status_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "gamma", status.gamma);
     cJSON_AddNumberToObject(root, "gate", status.gate);
     cJSON_AddNumberToObject(root, "afterimage", status.afterimage);
+    cJSON *fx = cJSON_AddObjectToObject(root, "fx");
+    if (fx) {
+        cJSON_AddNumberToObject(fx, "speed", status.fx.speed);
+        cJSON_AddNumberToObject(fx, "intensity", status.fx.intensity);
+        cJSON_AddNumberToObject(fx, "sensitivity", status.fx.sensitivity);
+        cJSON_AddNumberToObject(fx, "hue", status.fx.hue);
+        cJSON_AddNumberToObject(fx, "color_speed", status.fx.color_speed);
+        cJSON_AddNumberToObject(fx, "beat_react", status.fx.beat_react);
+    }
     cJSON_AddStringToObject(root, "device_name", s_device_name);
 
     const esp_app_desc_t *app_desc = esp_app_get_description();
@@ -684,6 +693,70 @@ static esp_err_t api_post_set_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "gamma", gamma);
     cJSON_AddNumberToObject(root, "gate", gate);
     cJSON_AddNumberToObject(root, "afterimage", afterimage);
+    char *json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json_str, strlen(json_str));
+    free(json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t api_fx_get_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+    core_status_t status;
+    dual_core_com_get_status(&status);
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "speed", status.fx.speed);
+    cJSON_AddNumberToObject(root, "intensity", status.fx.intensity);
+    cJSON_AddNumberToObject(root, "sensitivity", status.fx.sensitivity);
+    cJSON_AddNumberToObject(root, "hue", status.fx.hue);
+    cJSON_AddNumberToObject(root, "color_speed", status.fx.color_speed);
+    cJSON_AddNumberToObject(root, "beat_react", status.fx.beat_react);
+    char *json_str = cJSON_PrintUnformatted(root);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, json_str, strlen(json_str));
+    free(json_str);
+    cJSON_Delete(root);
+    return ESP_OK;
+}
+
+static esp_err_t api_fx_set_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+
+    core_command_t cmd = { .type = CMD_FX_SET };
+    cmd.data.fx.speed       = qs_get_float(req, "speed", 1.0f);
+    cmd.data.fx.intensity   = qs_get_float(req, "intensity", 1.0f);
+    cmd.data.fx.sensitivity = qs_get_float(req, "sensitivity", 1.0f);
+    cmd.data.fx.hue         = qs_get_float(req, "hue", 0.0f);
+    cmd.data.fx.color_speed = qs_get_float(req, "color_speed", 1.0f);
+    cmd.data.fx.beat_react  = qs_get_float(req, "beat_react", 0.6f);
+
+    esp_err_t ret = dual_core_com_send_command(&cmd, pdMS_TO_TICKS(100));
+
+    char json[160];
+    int len = snprintf(json, sizeof(json),
+        "{\"success\":%s,\"speed\":%.2f,\"intensity\":%.2f,\"sensitivity\":%.2f,\"hue\":%.2f,\"color_speed\":%.2f,\"beat_react\":%.2f}",
+        ret == ESP_OK ? "true" : "false",
+        (double)cmd.data.fx.speed, (double)cmd.data.fx.intensity, (double)cmd.data.fx.sensitivity,
+        (double)cmd.data.fx.hue, (double)cmd.data.fx.color_speed, (double)cmd.data.fx.beat_react);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, json, len);
+}
+
+static esp_err_t api_spectrum_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+    core_status_t status;
+    dual_core_com_get_status(&status);
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON *arr = cJSON_AddArrayToObject(root, "bands");
+    for (int i = 0; i < NUM_FREQ_BANDS; i++) {
+        cJSON_AddItemToArray(arr, cJSON_CreateNumber(status.bands[i]));
+    }
     char *json_str = cJSON_PrintUnformatted(root);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, json_str, strlen(json_str));
@@ -837,6 +910,34 @@ static const httpd_uri_t preflight_post = {
     .user_ctx  = NULL
 };
 
+static const httpd_uri_t api_fx_get = {
+    .uri       = "/api/fx",
+    .method    = HTTP_GET,
+    .handler   = api_fx_get_handler,
+    .user_ctx  = NULL
+};
+
+static const httpd_uri_t api_fx_set = {
+    .uri       = "/api/fx",
+    .method    = HTTP_POST,
+    .handler   = api_fx_set_handler,
+    .user_ctx  = NULL
+};
+
+static const httpd_uri_t preflight_fx = {
+    .uri       = "/api/fx",
+    .method    = HTTP_OPTIONS,
+    .handler   = cors_preflight_handler,
+    .user_ctx  = NULL
+};
+
+static const httpd_uri_t api_spectrum = {
+    .uri       = "/api/spectrum",
+    .method    = HTTP_GET,
+    .handler   = api_spectrum_handler,
+    .user_ctx  = NULL
+};
+
 static const httpd_uri_t preflight_mode = {
     .uri       = "/api/mode",
     .method    = HTTP_OPTIONS,
@@ -868,7 +969,7 @@ static esp_err_t start_web_server(void)
     
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
-    config.max_uri_handlers = 20;
+    config.max_uri_handlers = 24;
     config.core_id = 0;
     
     ESP_LOGI(TAG, "Starting AP mode web server on port %d", config.server_port);
@@ -889,6 +990,10 @@ static esp_err_t start_web_server(void)
     httpd_register_uri_handler(server, &api_post_get);
     httpd_register_uri_handler(server, &api_post_set);
     httpd_register_uri_handler(server, &preflight_post);
+    httpd_register_uri_handler(server, &api_fx_get);
+    httpd_register_uri_handler(server, &api_fx_set);
+    httpd_register_uri_handler(server, &preflight_fx);
+    httpd_register_uri_handler(server, &api_spectrum);
     httpd_register_uri_handler(server, &captive_generate_204);
     httpd_register_uri_handler(server, &captive_hotspot_detect);
     httpd_register_uri_handler(server, &captive_ncsi);
@@ -914,7 +1019,7 @@ static esp_err_t wifi_core_start_api_server(void)
     
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = s_web_config.port;
-    config.max_uri_handlers = 20;
+    config.max_uri_handlers = 24;
     config.core_id = 0;
     
     ESP_LOGI(TAG, "Starting STA API server on port %d", config.server_port);
@@ -937,6 +1042,10 @@ static esp_err_t wifi_core_start_api_server(void)
     httpd_register_uri_handler(server, &api_post_get);
     httpd_register_uri_handler(server, &api_post_set);
     httpd_register_uri_handler(server, &preflight_post);
+    httpd_register_uri_handler(server, &api_fx_get);
+    httpd_register_uri_handler(server, &api_fx_set);
+    httpd_register_uri_handler(server, &preflight_fx);
+    httpd_register_uri_handler(server, &api_spectrum);
     httpd_register_uri_handler(server, &preflight_mode);
     httpd_register_uri_handler(server, &preflight_command);
     ota_updater_register_httpd(server);
