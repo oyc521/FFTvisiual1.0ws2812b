@@ -26,3 +26,7 @@ OTA学习笔记.md
 OTA*.md
 main/日志.txt
 *.bak
+
+# Python 缓存
+__pycache__/
+*.pyc

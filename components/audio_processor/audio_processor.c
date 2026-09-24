@@ -1,5 +1,6 @@
 #include "audio_processor.h"
 #include "inmp441_mic.h"
+#include "wifi_audio.h"
 #include "utils.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -60,8 +61,26 @@ esp_err_t fft_processor_init(fft_processor_t *processor, int sample_rate) {
     return ESP_OK;
 }
 
-// 从麦克风读取音频数据
+// 音频输入源切换（麦克风 / WiFi 推流）
+static audio_source_t g_audio_source = AUDIO_SRC_MIC;
+
+void audio_processor_set_source(audio_source_t src)
+{
+    g_audio_source = src;
+    ESP_LOGI(TAG, "音频输入源切换为: %s", src == AUDIO_SRC_WIFI ? "WiFi" : "MIC");
+}
+
+audio_source_t audio_processor_get_source(void)
+{
+    return g_audio_source;
+}
+
+// 读取音频数据（按当前源分发）
 static esp_err_t read_microphone_data(int16_t *buffer, int samples) {
+    if (g_audio_source == AUDIO_SRC_WIFI) {
+        wifi_audio_read(buffer, samples, 20);
+        return ESP_OK;
+    }
     return mic_read(buffer, samples);
 }
 

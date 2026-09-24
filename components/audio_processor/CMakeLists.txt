@@ -5,6 +5,7 @@ idf_component_register(
     REQUIRES 
         inmp441_mic
         utils
+        wifi_audio
     PRIV_REQUIRES 
         esp-dsp
         driver

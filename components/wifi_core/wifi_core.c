@@ -16,6 +16,8 @@
 #include "lwip/ip4_addr.h"
 #include "cJSON.h"
 #include "ota_updater.h"
+#include "wifi_audio.h"
+#include "audio_processor.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -27,6 +29,11 @@
 #include <unistd.h>
 
 static const char *TAG = "WIFI_CORE";
+
+extern const char _binary_loopback_py_start[];
+extern const char _binary_loopback_py_end[];
+extern const char _binary_console_html_start[];
+extern const char _binary_console_html_end[];
 
 // WiFi事件组位定义
 #define WIFI_CONNECTED_BIT BIT0
@@ -67,6 +74,13 @@ static esp_err_t cors_preflight_handler(httpd_req_t *req)
     add_cors_headers(req);
     httpd_resp_set_status(req, "204 No Content");
     return httpd_resp_send(req, NULL, 0);
+}
+
+static esp_err_t console_html_handler(httpd_req_t *req)
+{
+    uint32_t len = (uint32_t)(_binary_console_html_end - _binary_console_html_start);
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    return httpd_resp_send(req, _binary_console_html_start, len);
 }
 
 // 内部函数声明
@@ -556,6 +570,9 @@ static esp_err_t api_status_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "device_name", s_device_name);
 
     const esp_app_desc_t *app_desc = esp_app_get_description();
+    cJSON_AddStringToObject(root, "source",
+        audio_processor_get_source() == AUDIO_SRC_WIFI ? "wifi" : "mic");
+    cJSON_AddBoolToObject(root, "wifi_streaming", wifi_audio_streaming());
     if (app_desc != NULL) {
         cJSON_AddStringToObject(root, "fw_version", app_desc->version);
         cJSON_AddStringToObject(root, "project_name", app_desc->project_name);
@@ -765,6 +782,72 @@ static esp_err_t api_spectrum_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static esp_err_t api_source_get_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+    const char *s = (audio_processor_get_source() == AUDIO_SRC_WIFI) ? "wifi" : "mic";
+    char json[48];
+    int len = snprintf(json, sizeof(json), "{\"source\":\"%s\"}", s);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, json, len);
+}
+
+static esp_err_t api_source_set_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+
+    char q[32] = {0};
+    char val[8] = {0};
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK) {
+        httpd_query_key_value(q, "src", val, sizeof(val));
+    }
+
+    audio_source_t src = AUDIO_SRC_MIC;
+    if (strcmp(val, "wifi") == 0) {
+        src = AUDIO_SRC_WIFI;
+    }
+    audio_processor_set_source(src);
+
+    char json[48];
+    int len = snprintf(json, sizeof(json), "{\"success\":true,\"source\":\"%s\"}",
+                       src == AUDIO_SRC_WIFI ? "wifi" : "mic");
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_send(req, json, len);
+}
+
+static esp_err_t loopback_py_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+    uint32_t len = (uint32_t)(_binary_loopback_py_end - _binary_loopback_py_start);
+    httpd_resp_set_type(req, "text/plain; charset=utf-8");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=loopback.py");
+    return httpd_resp_send(req, _binary_loopback_py_start, len);
+}
+
+static esp_err_t start_bat_handler(httpd_req_t *req)
+{
+    add_cors_headers(req);
+    char ip[16];
+    if (!wifi_audio_get_ip_str(ip, sizeof(ip))) {
+        strncpy(ip, "127.0.0.1", sizeof(ip));
+    }
+    int port = wifi_audio_get_port();
+    char bat[640];
+    int n = snprintf(bat, sizeof(bat),
+        "@echo off\r\n"
+        "if not exist \"%%TEMP%%\\esp_loopback.py\" curl -s \"http://%s/loopback.py\" -o \"%%TEMP%%\\esp_loopback.py\"\r\n"
+        "echo Installing Python deps (first time needs internet)...\r\n"
+        "python -m pip install pyaudiowpatch numpy -q\r\n"
+        "echo Starting stream. Close this window to stop.\r\n"
+        "python \"%%TEMP%%\\esp_loopback.py\" %s %d\r\n"
+        "if errorlevel 1 ( echo Failed. Make sure Python is installed and on PATH. )\r\n"
+        "pause\r\n",
+        ip, ip, port);
+    httpd_resp_set_type(req, "application/octet-stream");
+    httpd_resp_set_hdr(req, "Content-Disposition", "attachment; filename=start_esp_audio.bat");
+    return httpd_resp_send(req, bat, n);
+}
+
 // STA模式根路径处理器（极简页面）
 static esp_err_t sta_root_handler(httpd_req_t *req)
 {
@@ -801,14 +884,14 @@ static esp_err_t sta_root_handler(httpd_req_t *req)
 static const httpd_uri_t ap_root = {
     .uri       = "/",
     .method    = HTTP_GET,
-    .handler   = ap_root_get_handler,
+    .handler   = console_html_handler,
     .user_ctx  = NULL
 };
 
 static const httpd_uri_t sta_root = {
     .uri       = "/",
     .method    = HTTP_GET,
-    .handler   = sta_root_handler,
+    .handler   = console_html_handler,
     .user_ctx  = NULL
 };
 
@@ -938,6 +1021,34 @@ static const httpd_uri_t api_spectrum = {
     .user_ctx  = NULL
 };
 
+static const httpd_uri_t api_source_get = {
+    .uri       = "/api/source",
+    .method    = HTTP_GET,
+    .handler   = api_source_get_handler,
+    .user_ctx  = NULL
+};
+
+static const httpd_uri_t api_source_set = {
+    .uri       = "/api/source",
+    .method    = HTTP_POST,
+    .handler   = api_source_set_handler,
+    .user_ctx  = NULL
+};
+
+static const httpd_uri_t hdl_start_bat = {
+    .uri       = "/start.bat",
+    .method    = HTTP_GET,
+    .handler   = start_bat_handler,
+    .user_ctx  = NULL
+};
+
+static const httpd_uri_t hdl_loopback_py = {
+    .uri       = "/loopback.py",
+    .method    = HTTP_GET,
+    .handler   = loopback_py_handler,
+    .user_ctx  = NULL
+};
+
 static const httpd_uri_t preflight_mode = {
     .uri       = "/api/mode",
     .method    = HTTP_OPTIONS,
@@ -969,7 +1080,7 @@ static esp_err_t start_web_server(void)
     
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
-    config.max_uri_handlers = 24;
+    config.max_uri_handlers = 32;
     config.core_id = 0;
     
     ESP_LOGI(TAG, "Starting AP mode web server on port %d", config.server_port);
@@ -994,6 +1105,10 @@ static esp_err_t start_web_server(void)
     httpd_register_uri_handler(server, &api_fx_set);
     httpd_register_uri_handler(server, &preflight_fx);
     httpd_register_uri_handler(server, &api_spectrum);
+    httpd_register_uri_handler(server, &api_source_get);
+    httpd_register_uri_handler(server, &api_source_set);
+    httpd_register_uri_handler(server, &hdl_start_bat);
+    httpd_register_uri_handler(server, &hdl_loopback_py);
     httpd_register_uri_handler(server, &captive_generate_204);
     httpd_register_uri_handler(server, &captive_hotspot_detect);
     httpd_register_uri_handler(server, &captive_ncsi);
@@ -1019,7 +1134,7 @@ static esp_err_t wifi_core_start_api_server(void)
     
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = s_web_config.port;
-    config.max_uri_handlers = 24;
+    config.max_uri_handlers = 32;
     config.core_id = 0;
     
     ESP_LOGI(TAG, "Starting STA API server on port %d", config.server_port);
@@ -1046,6 +1161,10 @@ static esp_err_t wifi_core_start_api_server(void)
     httpd_register_uri_handler(server, &api_fx_set);
     httpd_register_uri_handler(server, &preflight_fx);
     httpd_register_uri_handler(server, &api_spectrum);
+    httpd_register_uri_handler(server, &api_source_get);
+    httpd_register_uri_handler(server, &api_source_set);
+    httpd_register_uri_handler(server, &hdl_start_bat);
+    httpd_register_uri_handler(server, &hdl_loopback_py);
     httpd_register_uri_handler(server, &preflight_mode);
     httpd_register_uri_handler(server, &preflight_command);
     ota_updater_register_httpd(server);

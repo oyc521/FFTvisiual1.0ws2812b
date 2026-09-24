@@ -17,6 +17,7 @@
 #include "utils.h"
 #include "dual_core_com.h"
 #include "wifi_core.h"
+#include "wifi_audio.h"
 #include "ota_updater.h"
 #include "led_core.h"
 
@@ -202,6 +203,8 @@ void app_main(void) {
         return;
     }  
     ESP_LOGI(TAG, "WiFi核心任务启动成功");
+
+    wifi_audio_init(5004);
     
     // 7. 创建音频处理任务
     ESP_LOGI(TAG, "步骤4: 启动音频处理任务...");

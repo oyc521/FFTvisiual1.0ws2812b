@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.16)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # "Trim" the build. Include the minimal set of components, main, and anything it depends on.
 idf_build_set_property(MINIMAL_BUILD ON)
-project(FFTvisiual1.0ws2812b VERSION 1.0.20)
+project(FFTvisiual1.0ws2812b VERSION 1.0.25)
 set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/components")
 # Components register themselves in their own CMakeLists under `components/`
 # Keep `${EXTRA_COMPONENT_DIRS}` set, CMake will discover component CMake files automatically.

@@ -13,6 +13,15 @@ extern "C" {
 #define FFT_OUTPUT_SIZE   (FFT_SIZE / 2)  // 输出点数（对称）
 #define NUM_FREQ_BANDS    8        // 频带数量
 
+// 音频输入源
+typedef enum {
+    AUDIO_SRC_MIC = 0,    // INMP441 麦克风 I2S 采集
+    AUDIO_SRC_WIFI = 1    // 手机/电脑经 UDP 推流的 PCM
+} audio_source_t;
+
+void audio_processor_set_source(audio_source_t src);
+audio_source_t audio_processor_get_source(void);
+
 // FFT处理器结构体
 typedef struct {
     int sample_rate;               // 采样率
